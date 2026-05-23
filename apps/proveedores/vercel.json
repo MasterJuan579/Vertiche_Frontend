@@ -1,0 +1,16 @@
+{
+  "buildCommand": "cd ../.. && npm run build --workspace=proveedores",
+  "outputDirectory": "dist",
+  "installCommand": "cd ../.. && npm install",
+  "framework": "vite",
+  "git": {
+    "deploymentEnabled": {
+      "prod": true,
+      "staging": true,
+      "team-sorter": false,
+      "team-rfid": false,
+      "team-dashboard": false,
+      "team-proveedores": false
+    }
+  }
+}

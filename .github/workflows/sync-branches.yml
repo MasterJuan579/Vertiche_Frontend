@@ -1,0 +1,83 @@
+name: Sync staging into team branches
+
+on:
+  schedule:
+    # 08:00 UTC, Monday-Friday = 02:00 Mexico City
+    - cron: '0 8 * * 1-5'
+  # Allow manual triggering from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    strategy:
+      # If one branch fails we still try the others
+      fail-fast: false
+      matrix:
+        branch: [team-sorter, team-rfid, team-dashboard, team-proveedores]
+
+    steps:
+      - name: Checkout team branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.branch }}
+          fetch-depth: 0
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Attempt merge from staging
+        id: merge
+        run: |
+          git fetch origin staging
+          if git merge origin/staging --no-edit -m "chore: auto-sync from staging"; then
+            git push origin ${{ matrix.branch }}
+            echo "result=success" >> $GITHUB_OUTPUT
+          else
+            echo "result=conflict" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Open issue on conflict
+        if: failure() && steps.merge.outputs.result != 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const branch = '${{ matrix.branch }}';
+            const teamSuffix = branch.replace('team-', '');
+            const title = `[sync] Conflict merging staging into ${branch}`;
+            const body = [
+              `The nightly auto-sync from \`staging\` into \`${branch}\` failed because of merge conflicts.`,
+              ``,
+              `## How to resolve`,
+              ``,
+              `Run these four commands locally to fix it:`,
+              ``,
+              `\`\`\`bash`,
+              `git checkout ${branch}`,
+              `git pull --no-rebase origin staging`,
+              `# VS Code shows each conflict with Accept Current / Accept Incoming / Accept Both buttons.`,
+              `# Resolve each file, then:`,
+              `git add .`,
+              `git commit -m "Resolve merge from staging"`,
+              `git push origin ${branch}`,
+              `\`\`\``,
+              ``,
+              `Most conflicts take 5-15 minutes. If a file is unfamiliar to your team, ping the owning team in the PR thread.`,
+              ``,
+              `## Why this happens`,
+              ``,
+              `Two teams edited the same lines in the same file. The sync action runs nightly to keep team branches close to \`staging\`, so the longer this issue sits open, the harder the next sync becomes. Aim to resolve within 24h.`,
+            ].join('\n');
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels: ['merge-conflict', `team-${teamSuffix}`],
+            });

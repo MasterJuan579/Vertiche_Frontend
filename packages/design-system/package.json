@@ -1,0 +1,12 @@
+{
+  "name": "@vertiche/design-system",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./tailwind-preset": "./tailwind-preset.js",
+    "./tokens.css": "./src/tokens.css"
+  }
+}
