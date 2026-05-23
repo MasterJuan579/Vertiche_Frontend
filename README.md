@@ -8,6 +8,8 @@ Trazabilidad RFID en tiempo real para el centro de distribución (CEDIS) de una 
 
 ## Arquitectura
 
+
+
 ```
 ┌──────────────────────────────────────────────────────────┐
 │              auth.vercel.app  (Login + Role picker)      │
