@@ -1,18 +1,15 @@
 {
   "name": "vertiche-frontend",
   "private": true,
-  "version": "1.0.0",
-  "description": "Vertiche SortFlow — monorepo with 5 Vite frontends and shared packages",
+  "version": "2.0.0",
+  "description": "Vertiche SortFlow — unified shell + per-module workspaces. Single Vercel deploy.",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev:auth": "npm run dev --workspace=auth",
-    "dev:rfid": "npm run dev --workspace=rfid",
-    "dev:sorter": "npm run dev --workspace=sorter",
-    "dev:dashboard": "npm run dev --workspace=dashboard",
-    "dev:proveedores": "npm run dev --workspace=proveedores",
-    "build:all": "npm run build --workspaces --if-present"
+    "dev": "npm run dev --workspace=web",
+    "build": "npm run build --workspace=web",
+    "preview": "npm run preview --workspace=web"
   }
 }

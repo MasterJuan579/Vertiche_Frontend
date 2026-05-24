@@ -34,7 +34,7 @@ export function Trazabilidad() {
     e?.preventDefault();
     const found = getTagByEpc(query.trim().toUpperCase());
     if (found) {
-      navigate(`/trazabilidad/${found.epc}`);
+      navigate(`/rfid/trazabilidad/${found.epc}`);
     } else {
       setTag(null);
     }
@@ -72,7 +72,7 @@ export function Trazabilidad() {
             {quickEpcs.map((e) => (
               <button
                 key={e}
-                onClick={() => navigate(`/trazabilidad/${e}`)}
+                onClick={() => navigate(`/rfid/trazabilidad/${e}`)}
                 className="font-mono text-rfid hover:underline"
               >
                 {e}

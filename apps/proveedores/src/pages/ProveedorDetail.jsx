@@ -39,7 +39,7 @@ export function ProveedorDetail() {
         <EmptyState
           title="Proveedor no encontrado"
           action={
-            <Button variant="primary" onClick={() => navigate('/')}>
+            <Button variant="primary" onClick={() => navigate('/proveedores')}>
               Volver
             </Button>
           }
@@ -56,7 +56,7 @@ export function ProveedorDetail() {
   return (
     <div className="p-8 max-w-[1400px] mx-auto">
       <Link
-        to="/"
+        to="/proveedores"
         className="inline-flex items-center gap-1.5 text-xs font-display font-semibold text-ink-400 hover:text-ink-700 uppercase tracking-industrial mb-4"
       >
         ← Volver

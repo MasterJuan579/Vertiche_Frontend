@@ -1,3 +1,4 @@
+// Component exports
 export { Card, CardHeader, CardBody } from './components/Card.jsx';
 export { Button } from './components/Button.jsx';
 export { StatusDot } from './components/StatusDot.jsx';
@@ -9,14 +10,12 @@ export { Table, TableHeader, TableRow, TableCell } from './components/Table.jsx'
 export { SearchInput } from './components/SearchInput.jsx';
 export { TabBar } from './components/TabBar.jsx';
 export { EmptyState } from './components/EmptyState.jsx';
+
+// Auth exports — new React-context API
 export {
+  AuthProvider,
+  useAuth,
+  RequireRole,
   mockSignIn,
-  getSession,
-  saveSession,
-  clearSession,
-  redirectToModule,
-  logout,
-  ensureRole,
-  ROLE_DESTINATIONS,
-  AUTH_URL,
-} from './auth.js';
+  ROLE_HOMES,
+} from './auth.jsx';

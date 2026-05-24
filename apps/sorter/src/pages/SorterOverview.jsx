@@ -132,7 +132,7 @@ export function SorterOverview() {
           </div>
         </div>
         <Link
-          to="/bahias"
+          to="/sorter/bahias"
           className="px-4 py-2 bg-white text-ink-700 rounded-card text-sm font-display font-semibold hover:bg-ink-50 transition-colors"
         >
           Ir a Bahías →

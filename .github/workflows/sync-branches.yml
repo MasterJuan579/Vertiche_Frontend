@@ -2,8 +2,8 @@ name: Sync staging into team branches
 
 on:
   schedule:
-    # 08:00 UTC, Monday-Friday = 02:00 Mexico City
-    - cron: '0 8 * * 1-5'
+    # 09:00 UTC daily = 03:00 Mexico City (UTC-6, no DST)
+    - cron: '0 9 * * *'
   # Allow manual triggering from the Actions tab
   workflow_dispatch:
 

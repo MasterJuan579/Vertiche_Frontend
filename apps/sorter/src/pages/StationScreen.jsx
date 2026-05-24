@@ -41,7 +41,7 @@ export function StationScreen() {
           title="Bahía no encontrada"
           description={`No existe una bahía con ID ${bahiaId}.`}
           action={
-            <Button variant="primary" onClick={() => navigate('/bahias')}>
+            <Button variant="primary" onClick={() => navigate('/sorter/bahias')}>
               Volver
             </Button>
           }
@@ -80,7 +80,7 @@ export function StationScreen() {
   return (
     <div className="p-8 max-w-[1400px] mx-auto">
       <Link
-        to="/bahias"
+        to="/sorter/bahias"
         className="inline-flex items-center gap-1.5 text-xs font-display font-semibold text-ink-400 hover:text-ink-700 uppercase tracking-industrial mb-4"
       >
         ← Volver a Bahías

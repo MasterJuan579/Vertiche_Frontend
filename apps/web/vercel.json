@@ -1,14 +1,17 @@
 {
-  "buildCommand": "cd ../.. && npm run build --workspace=sorter",
-  "outputDirectory": "dist",
+  "buildCommand": "cd ../.. && npm run build",
   "installCommand": "cd ../.. && npm install",
+  "outputDirectory": "dist",
   "framework": "vite",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ],
   "git": {
     "deploymentEnabled": {
       "prod": true,
       "staging": true,
-      "team-sorter": false,
       "team-rfid": false,
+      "team-sorter": false,
       "team-dashboard": false,
       "team-proveedores": false
     }

@@ -36,7 +36,7 @@ export function DetallePalet() {
           title="Palet no encontrado"
           description={`No existe un palet con ID ${paletId}.`}
           action={
-            <Button variant="primary" onClick={() => navigate('/pedidos')}>
+            <Button variant="primary" onClick={() => navigate('/rfid/pedidos')}>
               Volver al listado
             </Button>
           }
@@ -67,7 +67,7 @@ export function DetallePalet() {
   return (
     <div className="p-8 max-w-[1400px] mx-auto">
       <Link
-        to="/pedidos"
+        to="/rfid/pedidos"
         className="inline-flex items-center gap-1.5 text-xs font-display font-semibold text-ink-400 hover:text-ink-700 uppercase tracking-industrial mb-4"
       >
         ← Volver a Pedidos

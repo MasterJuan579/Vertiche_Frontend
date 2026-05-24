@@ -22,6 +22,27 @@ Cada equipo trabaja en su propia rama, abre PR hacia `staging` cuando algo está
 
 ---
 
+## Dónde vive tu código
+
+El shell (`apps/web/`) monta los cuatro módulos en una sola URL. Tu equipo solo edita su propia carpeta:
+
+- Equipo RFID → `apps/rfid/`
+- Equipo Sorter → `apps/sorter/`
+- Equipo Dashboard → `apps/dashboard/`
+- Equipo Proveedores → `apps/proveedores/`
+
+Cada módulo exporta un componente (`RfidModule`, `SorterModule`, etc.) que el shell importa y monta bajo `/rfid/*`, `/sorter/*`, etc. **No edites `apps/web/` ni `packages/` sin avisar primero** — son código compartido y un cambio ahí afecta a los cuatro equipos.
+
+Para agregar una página nueva a tu módulo:
+
+1. Crea `apps/<tu-modulo>/src/pages/MiPagina.jsx`
+2. Regístrala en `apps/<tu-modulo>/src/index.jsx` dentro del bloque `<Routes>`
+3. Si necesita aparecer en el menú, agrégala al array `NAV` en ese mismo archivo
+
+Las rutas internas de tu módulo son **relativas**: `<Route path="mi-pagina">` se monta como `/rfid/mi-pagina` (o el prefijo que corresponda). Los links del menú **sí llevan el prefijo completo** (`to="/rfid/mi-pagina"`) porque `NavLink` compara contra la URL real.
+
+---
+
 ## Tu día normal: tres comandos
 
 Al **inicio del día**:
@@ -58,7 +79,7 @@ Cuando una feature está terminada y probada en tu rama:
 
 ## El auto-sync nocturno
 
-Cada noche (08:00 UTC ≈ 02:00 hora de Ciudad de México, lunes a viernes) corre una GitHub Action que hace algo simple pero crítico:
+Cada noche (09:00 UTC = 03:00 hora de Ciudad de México, todos los días) corre una GitHub Action que hace algo simple pero crítico:
 
 > Toma `staging` y la mergea hacia tu rama `team-sorter`.
 
@@ -132,14 +153,17 @@ Estas son las reglas que debe activar el admin del repo, una sola vez:
 
 **Rama `prod`**:
 - ☑ Require a pull request before merging
-- ☑ Require approvals: **2**
-- ☑ Require branches to be up to date before merging
-- ☑ Restrict who can push: solo el lead del proyecto
+- ☑ Require approvals: **1**
+- ☑ Dismiss stale approvals when new commits are pushed
+- ☑ Block force pushes
+- ☑ Block branch deletion
 
 **Rama `staging`**:
 - ☑ Require a pull request before merging
 - ☑ Require approvals: **1**
-- ☑ Require branches to be up to date before merging
+- ☑ Dismiss stale approvals when new commits are pushed
+- ☑ Block force pushes
+- ☑ Block branch deletion
 
 **Ramas `team-*`**:
 - Sin protección. El equipo dueño puede pushear directo.
