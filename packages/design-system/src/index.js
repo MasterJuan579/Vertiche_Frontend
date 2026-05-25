@@ -1,4 +1,3 @@
-// Component exports
 export { Card, CardHeader, CardBody } from './components/Card.jsx';
 export { Button } from './components/Button.jsx';
 export { StatusDot } from './components/StatusDot.jsx';
@@ -10,8 +9,9 @@ export { Table, TableHeader, TableRow, TableCell } from './components/Table.jsx'
 export { SearchInput } from './components/SearchInput.jsx';
 export { TabBar } from './components/TabBar.jsx';
 export { EmptyState } from './components/EmptyState.jsx';
+export { ThemeToggle } from './components/ThemeToggle.jsx';
 
-// Auth exports — new React-context API
+// Auth exports — React-context API
 export {
   AuthProvider,
   useAuth,
@@ -19,3 +19,6 @@ export {
   mockSignIn,
   ROLE_HOMES,
 } from './auth.jsx';
+
+// Theme exports — dark/light mode
+export { ThemeProvider, useTheme } from './theme.jsx';

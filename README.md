@@ -159,7 +159,7 @@ Una GitHub Action corre todos los días a las 03:00 CDMX (`0 9 * * *` UTC) y sin
 | `SUPERVISOR` | rfid | Flujo CEDIS, pedidos, palets, trazabilidad EPC, lecturas live |
 | `BAY_OPERATOR` | sorter | Vista de sorter, ocho bahías, estación con 3 terminales × 4 prepacks |
 | `OPS_MANAGER` | dashboard | KPIs ejecutivos, productividad, anomalías |
-| `QA_INSPECTOR` | proveedores | Ranking de proveedores, inspecciones QA, historial de anomalías |
+| `QA_INSPECTOR` | proveedores | Pantalla de inspección (flujo de siniestros en 3 pasos), resumen del turno, plan de muestreo y ficha detallada por proveedor con historial QA |
 
 El rol está en el claim `custom:role` del JWT (alineado con la práctica estándar de Cognito).
 
@@ -188,6 +188,16 @@ const { session, signIn, signOut } = useAuth();
 // Para proteger un módulo:
 <RequireRole role="SUPERVISOR"><RfidModule /></RequireRole>
 ```
+
+### Theme (modo claro / oscuro)
+
+```jsx
+import { ThemeProvider, useTheme, ThemeToggle } from '@vertiche/design-system';
+```
+
+El shell ya envuelve toda la app en `<ThemeProvider>`, y `<ThemeToggle />` vive en el `AppShell` (esquina inferior izquierda, junto al botón de Salir). El estado se persiste en `localStorage` bajo la clave `vertiche.theme` y respeta la preferencia del sistema operativo en la primera visita.
+
+**Importante**: el toggle aparece en los cuatro módulos pero solo **proveedores** tiene variantes `dark:` completas en sus clases. Los módulos `rfid`, `sorter` y `dashboard` se ven igual sin importar el toggle hasta que cada equipo agregue variantes `dark:` a sus páginas. Esto es intencional — permite adopción gradual del modo oscuro sin bloquear la salida del refactor.
 
 ---
 

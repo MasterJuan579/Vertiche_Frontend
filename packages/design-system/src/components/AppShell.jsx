@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { ThemeToggle } from './ThemeToggle.jsx';
 
 export function AppShell({
   moduleName,
@@ -61,24 +62,27 @@ export function AppShell({
 
         {/* User block */}
         {user && (
-          <div className="border-t border-ink-100 px-4 py-3">
+          <div className="border-t border-ink-100 px-4 py-3 dark:border-ink-700">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-xs font-display font-semibold text-ink-700 truncate">
+                <div className="text-xs font-display font-semibold text-ink-700 truncate dark:text-ink-100">
                   {user.name}
                 </div>
                 <div className="text-[10px] text-ink-400 uppercase tracking-industrial font-display font-medium mt-0.5">
                   {user.role}
                 </div>
               </div>
-              {onLogout && (
-                <button
-                  onClick={onLogout}
-                  className="text-[10px] text-ink-400 hover:text-anomaly font-display font-semibold uppercase tracking-industrial"
-                >
-                  Salir
-                </button>
-              )}
+              <div className="flex items-center gap-2 shrink-0">
+                <ThemeToggle />
+                {onLogout && (
+                  <button
+                    onClick={onLogout}
+                    className="text-[10px] text-ink-400 hover:text-anomaly font-display font-semibold uppercase tracking-industrial"
+                  >
+                    Salir
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )}
