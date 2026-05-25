@@ -1,20 +1,19 @@
 import { Route, Routes, Navigate } from 'react-router-dom';
 import { AppShell, useAuth } from '@vertiche/design-system';
 import { FlujoCEDIS } from './pages/FlujoCEDIS.jsx';
-import { Pedidos } from './pages/Pedidos.jsx';
-import { DetallePalet } from './pages/DetallePalet.jsx';
+import { Bitacora } from './pages/Bitacora.jsx';
 import { Trazabilidad } from './pages/Trazabilidad.jsx';
-import { LecturasLive } from './pages/LecturasLive.jsx';
+import { Vinculacion } from './pages/Vinculacion.jsx';
 
 const ACCENT = '#1E40AF';
 
-// Nav items use absolute paths so the AppShell's NavLink components highlight
-// correctly. The shell mounts this module at "/rfid/*".
+// Absolute paths so NavLink active-state compares against the real URL.
+// Shell mounts this module at /rfid/*.
 const NAV = [
-  { to: '/rfid', label: 'Flujo CEDIS', end: true },
-  { to: '/rfid/pedidos', label: 'Pedidos & Palets' },
-  { to: '/rfid/trazabilidad', label: 'Trazabilidad' },
-  { to: '/rfid/lecturas', label: 'Lecturas en vivo' },
+  { to: '/rfid',               label: 'Flujo CEDIS',  end: true },
+  { to: '/rfid/bitacora',      label: 'Bitácora' },
+  { to: '/rfid/trazabilidad',  label: 'Trazabilidad' },
+  { to: '/rfid/vinculacion',   label: 'Registrar Tag' },
 ];
 
 export function RfidModule() {
@@ -29,15 +28,22 @@ export function RfidModule() {
       onLogout={signOut}
     >
       <Routes>
-        {/* Routes are relative to /rfid because the shell mounts this module
-            at "/rfid/*". So "/" here means "/rfid", "pedidos" means
-            "/rfid/pedidos", etc. */}
+        {/* Default — full CEDIS flow with Gantt + bay grid */}
         <Route path="/" element={<FlujoCEDIS />} />
-        <Route path="pedidos" element={<Pedidos />} />
-        <Route path="pedidos/:paletId" element={<DetallePalet />} />
+
+        {/* Event log (renamed from "Lecturas en Vivo" — no live sockets) */}
+        <Route path="bitacora" element={<Bitacora />} />
+
+        {/* EPC traceability — two patterns:
+            - /rfid/trazabilidad           → empty search state
+            - /rfid/trazabilidad/E001A     → auto-search that EPC on mount */}
         <Route path="trazabilidad" element={<Trazabilidad />} />
         <Route path="trazabilidad/:epc" element={<Trazabilidad />} />
-        <Route path="lecturas" element={<LecturasLive />} />
+
+        {/* Tag registration form */}
+        <Route path="vinculacion" element={<Vinculacion />} />
+
+        {/* Fallback */}
         <Route path="*" element={<Navigate to="/rfid" replace />} />
       </Routes>
     </AppShell>

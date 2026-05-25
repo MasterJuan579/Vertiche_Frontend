@@ -156,7 +156,7 @@ Una GitHub Action corre todos los días a las 03:00 CDMX (`0 9 * * *` UTC) y sin
 
 | Rol Cognito | Módulo destino | Lo que ve |
 |-------------|----------------|-----------|
-| `SUPERVISOR` | rfid | Flujo CEDIS, pedidos, palets, trazabilidad EPC, lecturas live |
+| `SUPERVISOR` | rfid | Flujo del CEDIS (Gantt con 25 OCs activas + grid de 10 bahías en 3 zonas), bitácora de lecturas con filtros por etapa, trazabilidad EPC con timeline horizontal y registro de tags RFID |
 | `BAY_OPERATOR` | sorter | Vista de sorter en vivo (con alerta dramática "Error de Sorter" para prepacks mal direccionados), directorio de las 10 bahías y vista por bahía con 3 estaciones más panel de detalle del prepack |
 | `OPS_MANAGER` | dashboard | KPIs ejecutivos, productividad, anomalías |
 | `QA_INSPECTOR` | proveedores | Pantalla de inspección (flujo de siniestros en 3 pasos), resumen del turno, plan de muestreo y ficha detallada por proveedor con historial QA |
@@ -197,7 +197,7 @@ import { ThemeProvider, useTheme, ThemeToggle } from '@vertiche/design-system';
 
 El shell ya envuelve toda la app en `<ThemeProvider>`, y `<ThemeToggle />` vive en el `AppShell` (esquina inferior izquierda, junto al botón de Salir). El estado se persiste en `localStorage` bajo la clave `vertiche.theme` y respeta la preferencia del sistema operativo en la primera visita.
 
-**Importante**: el toggle aparece en los cuatro módulos pero solo **proveedores** y **sorter** tienen variantes `dark:` completas en sus clases. Los módulos `rfid` y `dashboard` se ven igual sin importar el toggle hasta que cada equipo agregue variantes `dark:` a sus páginas. Esto es intencional — permite adopción gradual del modo oscuro sin bloquear la salida del refactor.
+**Importante**: el toggle aparece en los cuatro módulos pero solo **proveedores**, **sorter** y **rfid** tienen variantes `dark:` completas en sus clases. El módulo `dashboard` se ve igual sin importar el toggle hasta que su equipo agregue variantes `dark:` a sus páginas. Esto es intencional — permite adopción gradual del modo oscuro sin bloquear la salida del refactor.
 
 ---
 
