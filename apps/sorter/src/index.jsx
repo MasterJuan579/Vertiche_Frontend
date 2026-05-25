@@ -1,13 +1,15 @@
 import { Route, Routes, Navigate } from 'react-router-dom';
 import { AppShell, useAuth } from '@vertiche/design-system';
-import { BahiaList } from './pages/BahiaList.jsx';
-import { StationScreen } from './pages/StationScreen.jsx';
-import { SorterOverview } from './pages/SorterOverview.jsx';
+import { SorterScreen } from './pages/SorterScreen.jsx';
+import { BahiasList } from './pages/BahiasList.jsx';
+import { BayScreen } from './pages/BayScreen.jsx';
 
 const ACCENT = '#7C3AED';
 
+// Absolute paths so NavLink active-state compares against the real URL.
+// Shell mounts this module at /sorter/*.
 const NAV = [
-  { to: '/sorter', label: 'Sorter', end: true },
+  { to: '/sorter',        label: 'Sorter',  end: true },
   { to: '/sorter/bahias', label: 'Bahías' },
 ];
 
@@ -23,9 +25,17 @@ export function SorterModule() {
       onLogout={signOut}
     >
       <Routes>
-        <Route path="/" element={<SorterOverview />} />
-        <Route path="bahias" element={<BahiaList />} />
-        <Route path="bahias/:bahiaId" element={<StationScreen />} />
+        {/* Default — live scanner view */}
+        <Route path="/" element={<SorterScreen />} />
+
+        {/* Bay directory */}
+        <Route path="bahias" element={<BahiasList />} />
+
+        {/* Per-bay detail. BayScreen redirects to /sorter/bahias if the ID
+            is bad (non-numeric or out of range). */}
+        <Route path="bahia/:id" element={<BayScreen />} />
+
+        {/* Anything else bounces to the scanner */}
         <Route path="*" element={<Navigate to="/sorter" replace />} />
       </Routes>
     </AppShell>

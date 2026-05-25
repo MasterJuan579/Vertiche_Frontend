@@ -86,4 +86,25 @@
       transform: translateY(0);
     }
   }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+  }
+
+  @keyframes glow-bay {
+    0%, 100% {
+      box-shadow: 0 0 0 0 currentColor, 0 0 24px 0 currentColor;
+      filter: brightness(1);
+    }
+    50% {
+      box-shadow: 0 0 0 6px transparent, 0 0 48px 8px currentColor;
+      filter: brightness(1.15);
+    }
+  }
+
+  @keyframes pop {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.18); }
+  }
 }
