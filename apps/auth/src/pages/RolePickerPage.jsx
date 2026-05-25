@@ -1,4 +1,5 @@
-import { mockSignIn, redirectToModule } from '@vertiche/design-system';
+import { useNavigate } from 'react-router-dom';
+import { mockSignIn, useAuth, ROLE_HOMES } from '@vertiche/design-system';
 import { mockUsers } from '@vertiche/mock-data';
 
 const ROLES = [
@@ -33,11 +34,16 @@ const ROLES = [
 ];
 
 export function RolePickerPage() {
+  const navigate = useNavigate();
+  const { signIn } = useAuth();
+
   function handleSelect(roleKey) {
     const user = mockUsers[roleKey];
     if (!user) return;
-    const { token } = mockSignIn(user);
-    redirectToModule(roleKey, token);
+    // Install the session in React state + sessionStorage, then navigate to
+    // the role's module. No page reload, no URL fragment.
+    signIn(mockSignIn(user));
+    navigate(ROLE_HOMES[roleKey]);
   }
 
   return (
@@ -103,9 +109,8 @@ export function RolePickerPage() {
         </div>
 
         <div className="mt-8 text-center text-xs text-ink-400">
-          Esta demo redirige a la URL del módulo correspondiente con un token JWT
-          mock en el fragmento. En producción, AWS Cognito gestionaría el token
-          real.
+          Esta demo instala una sesión mock en el navegador y navega al módulo
+          correspondiente. En producción, AWS Cognito gestionaría el token real.
         </div>
       </div>
     </div>

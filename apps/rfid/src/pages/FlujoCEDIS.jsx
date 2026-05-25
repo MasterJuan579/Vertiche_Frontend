@@ -1,265 +1,707 @@
-import { useMemo, useState } from 'react';
-import { Card, CardBody, KPI, StatusDot, StatusPill } from '@vertiche/design-system';
-import { palets, ETAPAS, ETAPA_COLORS, tiendas, kpis } from '@vertiche/mock-data';
+import { useState } from 'react';
+import {
+  DEMO_OCS,
+  DEMO_KPI,
+  ETAPAS_FLUJO,
+  ETAPA_COLORS,
+} from '../data/demoOCs.js';
+import { ModalOC } from '../components/ModalOC.jsx';
+import { ModalResumenOC } from '../components/ModalResumenOC.jsx';
 
-const MODE_LINE = 'linea';
-const MODE_MAP = 'mapa';
+/**
+ * Supervisor's home view. Three sections vertically:
+ *
+ *   1. BarraKPI    — top strip with "mejora vs manual" semaphore + 3 stats +
+ *                    pause toggle. The pause is decorative without real data.
+ *   2. Gantt       — sticky-left OC name column + 7 stage cells per OC row.
+ *                    Click name → ModalResumenOC. Click stage cell → ModalOC.
+ *   3. Bay grid    — 10 bays × 3 zones (Bahías / Auditoría / Envío). Click
+ *                    any cell with OCs → expandable panel with the OC list.
+ *
+ * In production, useEffect polls api.getOrdenes() every 8 seconds. Without
+ * the API, the data is static from DEMO_OCS / DEMO_KPI.
+ */
+
+const ZONA_LABELS = {
+  BAHIA:     'Bahías',
+  AUDITORIA: 'Auditoría',
+  ENVIO:     'Envío',
+};
+
+const ZONA_ACCENT = {
+  BAHIA:     '#0891B2',
+  AUDITORIA: '#DB2777',
+  ENVIO:     '#16A34A',
+};
 
 export function FlujoCEDIS() {
-  const [mode, setMode] = useState(MODE_LINE);
+  const [pausado, setPausado] = useState(false);
+  const [panelBahia, setPanelBahia] = useState(null);
 
-  const paletsByEtapa = useMemo(() => {
-    const grouped = {};
-    ETAPAS.forEach((e) => (grouped[e] = []));
-    palets.forEach((p) => grouped[p.etapa_actual]?.push(p));
-    return grouped;
-  }, []);
+  // Modal state
+  const [ocModalOpen, setOcModalOpen] = useState(null);          // { oc, etapaOrigen }
+  const [ocResumenOpen, setOcResumenOpen] = useState(null);      // oc
+
+  const ocs = DEMO_OCS.filter((oc) => oc.etapasActivas.length > 0);
+
+  function ocsEnBahiaYEtapa(numBahia, etapa) {
+    const bahiaId = `BAHIA-${numBahia}`;
+    return ocs.filter((oc) =>
+      (oc.tagsPorEtapa[etapa] || []).some(
+        (t) => t.tienda?.bahia_asignada === bahiaId
+      )
+    );
+  }
+
+  const openModalDetalle = (oc, etapaOrigen) => {
+    setOcModalOpen({ oc, etapaOrigen });
+  };
+
+  const openModalResumen = (oc) => {
+    setOcResumenOpen(oc);
+  };
 
   return (
-    <div className="p-8 max-w-[1400px] mx-auto">
-      <PageHeader mode={mode} onModeChange={setMode} />
+    <div className="space-y-4">
 
-      {/* Top KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <Card>
-          <CardBody>
-            <KPI
-              label="Palets en proceso"
-              value={palets.filter((p) => p.estado !== 'ENVIADO').length}
-              unit="activos"
-              size="lg"
-              accent="#1E40AF"
-            />
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <KPI
-              label="Procesados hoy"
-              value={kpis.hoy.palets_procesados}
-              unit={`/ ${kpis.hoy.palets_meta} meta`}
-              size="lg"
-              status="flow"
-            />
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <KPI
-              label="Tiempo de ciclo"
-              value={`${kpis.hoy.tiempo_ciclo_promedio_min}`}
-              unit="min"
-              size="lg"
-              trend={-kpis.hoy.mejora_pct}
-              trendLabel="vs proceso manual"
-              status="flow"
-            />
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <KPI
-              label="Tasa de anomalía"
-              value={`${kpis.hoy.tasa_anomalia_pct}`}
-              unit="%"
-              size="lg"
-              status={kpis.hoy.tasa_anomalia_pct > 3 ? 'attention' : 'flow'}
-            />
-          </CardBody>
-        </Card>
-      </div>
+      {/* ════════════ KPI BAR ════════════ */}
+      <BarraKPI
+        kpi={DEMO_KPI}
+        pausado={pausado}
+        onTogglePausa={() => setPausado((p) => !p)}
+      />
 
-      {mode === MODE_LINE ? (
-        <LineMode paletsByEtapa={paletsByEtapa} />
-      ) : (
-        <MapMode paletsByEtapa={paletsByEtapa} />
+      {/* ════════════ GANTT ════════════ */}
+      <Panel>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-ink-100 dark:border-ink-600 flex-wrap gap-2">
+          <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-ink-400 flex items-center gap-2">
+            Flujo del CEDIS
+            {pausado && (
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-flow-bg text-flow dark:bg-flow/20 dark:text-flow-ring">
+                ⏸ Pausado
+              </span>
+            )}
+            <span className="font-normal text-ink-400">— {ocs.length} OCs activas</span>
+          </div>
+        </div>
+
+        <div className="px-5 py-4">
+          {ocs.length === 0 ? (
+            <div className="px-6 py-10 text-center text-[13px] text-ink-400">
+              Sin órdenes de compra activas.
+            </div>
+          ) : (
+            <Gantt
+              ocs={ocs}
+              onClickSegmento={openModalDetalle}
+              onClickNombre={openModalResumen}
+            />
+          )}
+
+          {/* ════════════ BAY GRID ════════════ */}
+          {ocs.length > 0 && (
+            <div className="border-t border-ink-100 dark:border-ink-600 pt-4 mt-6">
+              <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-ink-400 mb-3">
+                Estado por bahía
+              </div>
+
+              {[
+                { zona: 'BAHIA',     label: ZONA_LABELS.BAHIA,     color: ZONA_ACCENT.BAHIA },
+                { zona: 'AUDITORIA', label: ZONA_LABELS.AUDITORIA, color: ZONA_ACCENT.AUDITORIA },
+                { zona: 'ENVIO',     label: ZONA_LABELS.ENVIO,     color: ZONA_ACCENT.ENVIO },
+              ].map((fila) => (
+                <BayRow
+                  key={fila.zona}
+                  fila={fila}
+                  ocsEnBahiaYEtapa={ocsEnBahiaYEtapa}
+                  activeKey={panelBahia?.key}
+                  onClickCell={(numBahia) => {
+                    const key = `${fila.zona}-B${numBahia}`;
+                    if (panelBahia?.key === key) {
+                      setPanelBahia(null);
+                    } else {
+                      const ocsB = ocsEnBahiaYEtapa(numBahia, fila.zona);
+                      setPanelBahia({
+                        key,
+                        titulo: `${fila.label} — Bahía ${numBahia}`,
+                        ocs: ocsB,
+                      });
+                    }
+                  }}
+                />
+              ))}
+
+              {panelBahia && (
+                <PanelBahia
+                  titulo={panelBahia.titulo}
+                  ocs={panelBahia.ocs}
+                  onClose={() => setPanelBahia(null)}
+                  onAbrirOC={openModalDetalle}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </Panel>
+
+      {/* ════════════ MODALS ════════════ */}
+      {ocModalOpen && (
+        <ModalOC
+          oc={ocModalOpen.oc}
+          etapaOrigen={ocModalOpen.etapaOrigen}
+          onClose={() => setOcModalOpen(null)}
+        />
+      )}
+      {ocResumenOpen && (
+        <ModalResumenOC
+          oc={ocResumenOpen}
+          onClose={() => setOcResumenOpen(null)}
+        />
       )}
     </div>
   );
 }
 
-function PageHeader({ mode, onModeChange }) {
+// ════════════════════════════════════════════════════════════════════
+// KPI BAR
+// ════════════════════════════════════════════════════════════════════
+
+function BarraKPI({ kpi, pausado, onTogglePausa }) {
+  const mejora = kpi?.mejora_porcentaje ?? null;
+  const meta = kpi?.objetivo_mejora_pct || 32;
+  const metaOk = mejora !== null && mejora >= meta;
+
+  // Semaphore color
+  const sem = mejora === null
+    ? 'gris'
+    : metaOk
+      ? 'verde'
+      : mejora >= 20
+        ? 'amarillo'
+        : 'rojo';
+
+  const semClass = {
+    verde:    'bg-flow-bg border-flow-ring/40 text-flow dark:bg-flow/20 dark:border-flow-ring/40 dark:text-flow-ring',
+    amarillo: 'bg-attention-bg border-attention-ring/40 text-attention dark:bg-attention/20 dark:border-attention-ring/40 dark:text-attention-ring',
+    rojo:     'bg-anomaly-bg border-anomaly-ring/40 text-anomaly dark:bg-anomaly/20 dark:border-anomaly-ring/40 dark:text-anomaly-ring',
+    gris:     'bg-ink-50 border-ink-100 text-ink-400 dark:bg-ink-700 dark:border-ink-500 dark:text-ink-400',
+  }[sem];
+
+  const dotClass = {
+    verde:    'bg-flow-ring',
+    amarillo: 'bg-attention-ring',
+    rojo:     'bg-anomaly-ring animate-[pulse-rojo_1.4s_ease-in-out_infinite]',
+    gris:     'bg-ink-300',
+  }[sem];
+
+  const cicloLabel = kpi?.tiempo_promedio_hoy_min
+    ? `${Math.floor(kpi.tiempo_promedio_hoy_min / 60)}h ${kpi.tiempo_promedio_hoy_min % 60}min`
+    : '—';
+
   return (
-    <div className="flex items-end justify-between mb-8 gap-4">
-      <div>
-        <div className="label-industrial text-ink-400 mb-2">Vista general</div>
-        <h1 className="font-display font-bold text-3xl text-ink-700 tracking-tight">
-          Flujo CEDIS
-        </h1>
-        <p className="text-sm text-ink-400 mt-1">
-          Estado en tiempo real de los siete estadios del proceso RFID.
-        </p>
+    <div className={
+      'flex items-center gap-0 px-5 h-[62px] rounded-card shadow-card overflow-x-auto ' +
+      'bg-white border border-ink-100 ' +
+      'dark:bg-ink-700 dark:border-ink-600'
+    }>
+      {/* Main semaphore card */}
+      <div className={
+        'flex items-center gap-3 mr-5 px-4 py-2 rounded-card border-[1.5px] shrink-0 ' +
+        semClass
+      }>
+        <span className={'w-3.5 h-3.5 rounded-full shrink-0 ' + dotClass} />
+        <div>
+          <div className="font-mono text-[9px] font-bold uppercase tracking-industrial mb-0.5">
+            Mejora vs manual · meta: {meta}%
+          </div>
+          <div className="text-[24px] font-extrabold leading-none">
+            {mejora !== null ? `${mejora.toFixed(1)}%` : '—'}
+            {metaOk && (
+              <span className="text-[11px] font-semibold ml-2">✓ Meta cumplida</span>
+            )}
+          </div>
+        </div>
       </div>
 
-      <div className="inline-flex rounded-card bg-white border border-ink-200 p-1">
-        {[
-          { id: MODE_LINE, label: 'Línea' },
-          { id: MODE_MAP, label: 'Mapa' },
-        ].map((m) => (
-          <button
-            key={m.id}
-            onClick={() => onModeChange(m.id)}
-            className={`px-4 py-1.5 text-xs font-display font-semibold uppercase tracking-industrial rounded transition-colors ${
-              mode === m.id
-                ? 'bg-ink-700 text-white'
-                : 'text-ink-400 hover:text-ink-700'
-            }`}
-          >
-            {m.label}
-          </button>
+      <div className="w-px h-8 bg-ink-100 dark:bg-ink-600 mr-5 shrink-0" />
+
+      {/* Secondary stats */}
+      {[
+        { label: 'Ciclo promedio', value: cicloLabel,                         accent: 'text-ink-700 dark:text-ink-100' },
+        { label: 'OCs activas',    value: kpi?.palets_activos ?? '—',         accent: 'text-ink-700 dark:text-ink-100' },
+        { label: 'Completadas hoy', value: kpi?.palets_completados_hoy ?? '—', accent: 'text-flow dark:text-flow-ring' },
+      ].map((s) => (
+        <div key={s.label} className="mr-6 shrink-0">
+          <div className={'text-[20px] font-extrabold leading-none ' + s.accent}>
+            {s.value}
+          </div>
+          <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-ink-400 mt-0.5">
+            {s.label}
+          </div>
+        </div>
+      ))}
+
+      <div className="flex-1" />
+
+      <div className="w-px h-8 bg-ink-100 dark:bg-ink-600 mr-3 shrink-0" />
+
+      {/* Pause toggle */}
+      <button
+        type="button"
+        onClick={onTogglePausa}
+        className={
+          'flex items-center gap-1.5 px-3.5 py-1.5 rounded-card border-[1.5px] text-[11px] font-bold transition-colors shrink-0 ' +
+          (pausado
+            ? 'bg-flow-bg border-flow-ring/40 text-flow dark:bg-flow/20 dark:border-flow-ring/40 dark:text-flow-ring'
+            : 'bg-ink-50 border-ink-100 text-ink-400 hover:bg-ink-100 dark:bg-ink-700 dark:border-ink-500 dark:text-ink-300 dark:hover:bg-ink-600')
+        }
+      >
+        <span className="text-[13px]">{pausado ? '▶' : '⏸'}</span>
+        {pausado ? 'Reanudar' : 'Pausar'}
+      </button>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// GANTT
+// ════════════════════════════════════════════════════════════════════
+
+function Gantt({ ocs, onClickSegmento, onClickNombre }) {
+  const GANTT_COLS = `180px repeat(${ETAPAS_FLUJO.length}, 1fr)`;
+
+  return (
+    <div className="overflow-x-auto mb-3">
+      <div className="min-w-[800px]">
+        {/* Header row */}
+        <div
+          className="grid mb-1"
+          style={{ gridTemplateColumns: GANTT_COLS }}
+        >
+          <div className="pl-3 pb-1.5 border-b-2 border-ink-100 dark:border-ink-600">
+            <span className="font-mono text-[9px] font-bold uppercase tracking-industrial text-ink-400">
+              Orden de compra
+            </span>
+          </div>
+          {ETAPAS_FLUJO.map((etapa) => (
+            <div
+              key={etapa.id}
+              className="text-center pb-1.5"
+              style={{ borderBottom: `2px solid ${ETAPA_COLORS[etapa.id]}` }}
+            >
+              <div
+                className="font-mono text-[9px] font-bold uppercase tracking-industrial"
+                style={{ color: ETAPA_COLORS[etapa.id] }}
+              >
+                {etapa.short}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* OC rows */}
+        {ocs.map((oc) => (
+          <BarraOC
+            key={oc.ordenId}
+            oc={oc}
+            columnWidths={GANTT_COLS}
+            onClickSegmento={onClickSegmento}
+            onClickNombre={onClickNombre}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function LineMode({ paletsByEtapa }) {
-  return (
-    <Card>
-      <CardBody className="!p-6">
-        <div className="grid grid-cols-7 gap-3">
-          {ETAPAS.map((etapa) => {
-            const list = paletsByEtapa[etapa] || [];
-            return (
-              <div
-                key={etapa}
-                className="rounded-card border border-ink-100 bg-ink-50/50 overflow-hidden"
-              >
-                <div
-                  className="px-3 py-2 flex items-center justify-between"
-                  style={{ background: `${ETAPA_COLORS[etapa]}14` }}
-                >
-                  <div className="flex items-center gap-2">
-                    <StatusDot
-                      status={list.length > 4 ? 'attention' : 'flow'}
-                      size="sm"
-                    />
-                    <span
-                      className="label-industrial"
-                      style={{ color: ETAPA_COLORS[etapa] }}
-                    >
-                      {etapa}
-                    </span>
-                  </div>
-                  <span className="font-mono font-bold text-base text-ink-700 tabular">
-                    {list.length}
-                  </span>
-                </div>
-                <div className="p-2 space-y-1.5 min-h-[200px]">
-                  {list.slice(0, 6).map((p) => (
-                    <div
-                      key={p.palet_id}
-                      className="bg-white border border-ink-100 rounded p-2 text-[11px]"
-                    >
-                      <div className="font-mono text-ink-700 font-semibold">
-                        {p.palet_id}
-                      </div>
-                      <div className="text-ink-400 mt-0.5">
-                        {p.total_prepacks} prepacks
-                      </div>
-                    </div>
-                  ))}
-                  {list.length > 6 && (
-                    <div className="text-[10px] text-ink-400 px-1">
-                      + {list.length - 6} más
-                    </div>
-                  )}
-                  {list.length === 0 && (
-                    <div className="text-[10px] text-ink-300 italic px-1">
-                      Vacío
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </CardBody>
-    </Card>
-  );
-}
-
-function MapMode({ paletsByEtapa }) {
-  return (
-    <Card>
-      <CardBody className="!p-8 bg-ink-50/40">
-        <div className="text-center mb-6">
-          <div className="label-industrial text-ink-400 mb-1">CEDIS — Planta operativa</div>
-          <div className="font-display font-semibold text-ink-500 text-sm">
-            Recorrido físico de izquierda a derecha
-          </div>
-        </div>
-
-        <div className="grid grid-cols-7 gap-1 items-stretch">
-          {ETAPAS.map((etapa, i) => {
-            const count = paletsByEtapa[etapa]?.length || 0;
-            const isLast = i === ETAPAS.length - 1;
-            return (
-              <div key={etapa} className="relative flex flex-col">
-                <Zone etapa={etapa} count={count} color={ETAPA_COLORS[etapa]} />
-                {!isLast && (
-                  <div className="absolute -right-3 top-1/2 -translate-y-1/2 z-10">
-                    <span className="text-ink-300 font-mono text-lg">→</span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Bahias row */}
-        <div className="mt-6">
-          <div className="label-industrial text-ink-400 mb-3">
-            Bahías de empaque · {tiendas.length} tiendas asignadas
-          </div>
-          <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((bn) => {
-              const t = tiendas.find((x) => x.bahia_asignada === `B${bn}`);
-              return (
-                <div
-                  key={bn}
-                  className="bg-white border border-ink-100 rounded-card p-3 text-center"
-                >
-                  <div className="font-display font-bold text-ink-700 text-lg">
-                    B{bn}
-                  </div>
-                  <div className="text-[10px] text-ink-400 truncate mt-1">
-                    {t?.nombre || '—'}
-                  </div>
-                  <div className="mt-2">
-                    <StatusPill
-                      status={t?.estado_rep === 'ALERTA' ? 'attention' : 'flow'}
-                    >
-                      {t?.estado_rep || 'NORMAL'}
-                    </StatusPill>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </CardBody>
-    </Card>
-  );
-}
-
-function Zone({ etapa, count, color }) {
+function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
   return (
     <div
-      className="relative rounded-card border-2 p-4 flex flex-col items-center justify-center min-h-[160px] bg-white"
-      style={{ borderColor: `${color}33` }}
+      className="grid w-full items-center border-b border-ink-100 dark:border-ink-600"
+      style={{ gridTemplateColumns: columnWidths, minHeight: 44 }}
     >
-      <StatusDot status={count > 4 ? 'attention' : 'flow'} size="lg" pulse />
-      <div className="font-mono tabular font-bold text-3xl text-ink-700 mt-2">
-        {count}
-      </div>
-      <div className="text-[10px] text-ink-400 mt-1">en tránsito</div>
+      {/* Sticky-left OC name */}
       <div
-        className="absolute bottom-0 left-0 right-0 px-2 py-1.5 text-center"
-        style={{ background: `${color}` }}
+        onClick={(e) => { e.stopPropagation(); onClickNombre(oc); }}
+        className={
+          'sticky left-0 z-[2] flex flex-col justify-center cursor-pointer ' +
+          'border-r border-ink-100 dark:border-ink-600 pl-3 pr-2 ' +
+          'bg-white hover:bg-rfid/5 ' +
+          'dark:bg-ink-700 dark:hover:bg-rfid/10 transition-colors'
+        }
+        style={{ minHeight: 44 }}
       >
-        <span className="label-industrial text-white">{etapa}</span>
+        <div className="text-[12px] font-semibold text-ink-700 dark:text-ink-100 truncate max-w-[160px]">
+          {oc.nombre}
+        </div>
+        <div className="font-mono text-[9px] text-ink-400 truncate">
+          {oc.totalPrepacks} prep. · {oc.proveedor}
+        </div>
       </div>
+
+      {/* Stage cells */}
+      {ETAPAS_FLUJO.map((etapa, idx) => {
+        const tagsEnEtapa = oc.tagsPorEtapa[etapa.id] || [];
+        const tienePrep = tagsEnEtapa.length > 0;
+        const enRango = idx >= oc.idxMin && idx <= oc.idxMax;
+        const errEnEtapa = tagsEnEtapa.some((t) => t.qa_fallido === true);
+        const color = ETAPA_COLORS[etapa.id] || '#94A3B8';
+        const datos = tienePrep ? getDatosEtapa(etapa.id, tagsEnEtapa, oc) : null;
+
+        return (
+          <StageCell
+            key={etapa.id}
+            tienePrep={tienePrep}
+            enRango={enRango}
+            errEnEtapa={errEnEtapa}
+            color={color}
+            datos={datos}
+            tagsEnEtapaCount={tagsEnEtapa.length}
+            totalPrepacks={oc.totalPrepacks}
+            onClick={() => tienePrep && onClickSegmento(oc, etapa.id)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, tagsEnEtapaCount, totalPrepacks, onClick }) {
+  // Empty placeholder
+  if (!tienePrep && !enRango) {
+    return <div className="h-9 m-[3px_2px]" />;
+  }
+
+  // In-range but empty (dashed line)
+  if (!tienePrep && enRango) {
+    return (
+      <div className="h-9 m-[3px_2px] rounded-md flex items-center justify-center bg-ink-50/50 border border-dashed border-ink-100 dark:bg-ink-800/30 dark:border-ink-600">
+        <div className="w-5 h-0.5 rounded bg-ink-200 dark:bg-ink-500" />
+      </div>
+    );
+  }
+
+  // Active stage
+  const pctWidth = Math.min(100, Math.round((tagsEnEtapaCount / totalPrepacks) * 100));
+  const bg = errEnEtapa ? 'rgba(239, 68, 68, 0.12)' : `${color}1f`;
+  const border = errEnEtapa ? '#FCA5A5' : `${color}66`;
+
+  return (
+    <div
+      onClick={onClick}
+      className="h-9 m-[3px_2px] rounded-md relative overflow-hidden cursor-pointer transition-all flex items-center justify-center"
+      style={{
+        background: bg,
+        border: `1.5px solid ${border}`,
+      }}
+      onMouseEnter={(e) => {
+        if (!errEnEtapa) {
+          e.currentTarget.style.background = `${color}3a`;
+          e.currentTarget.style.borderColor = color;
+        }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = bg;
+        e.currentTarget.style.borderColor = border;
+      }}
+    >
+      {/* Progress overlay */}
+      <div
+        className="absolute left-0 top-0 bottom-0 rounded-l-md pointer-events-none"
+        style={{
+          width: `${pctWidth}%`,
+          background: `${color}10`,
+        }}
+      />
+
+      {/* Stats row */}
+      <div className="flex items-center w-full justify-around px-1.5 z-[1] relative">
+        {datos.map((d, i) => (
+          <div key={i} className="text-center flex-1">
+            <div
+              className="text-[13px] font-extrabold leading-none"
+              style={{ color: errEnEtapa ? '#DC2626' : color }}
+            >
+              {d.v}
+            </div>
+            {d.l && (
+              <div
+                className="text-[7px] font-bold uppercase tracking-industrial mt-0.5 opacity-80 leading-tight"
+                style={{ color: errEnEtapa ? '#991B1B' : color }}
+              >
+                {d.l}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Anomaly dot */}
+      {errEnEtapa && (
+        <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-anomaly border-2 border-white animate-[pulse-rojo_1.4s_ease-in-out_infinite]" />
+      )}
+    </div>
+  );
+}
+
+/** Per-stage 3-value display data. */
+function getDatosEtapa(etapaId, tagsEnEtapa, oc) {
+  const total = oc.totalPrepacks;
+  const n = tagsEnEtapa.length;
+  const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+  const err = tagsEnEtapa.filter((t) => t.qa_fallido).length;
+  const ok = n - err;
+  const pctOk = n > 0 ? Math.round((ok / n) * 100) : 100;
+  const esp = oc.total_esperados || total;
+
+  return ({
+    PREREGISTRO: [{ l: 'recibidos',   v: n },  { l: 'esperados',  v: esp }, { l: '%',           v: `${pct}%` }],
+    QA:          [{ l: 'revisados',   v: n },  { l: 'aprobados',  v: ok },  { l: 'calidad',     v: `${pctOk}%` }],
+    REGISTRO:    [{ l: 'registrados', v: n },  { l: 'de',         v: total },{ l: 'avance',     v: `${pct}%` }],
+    SORTER:      [{ l: 'clasificados',v: n },  { l: 'total',      v: total },{ l: 'procesado',  v: `${pct}%` }],
+    BAHIA:       [{ l: 'en bahía',    v: n },  { l: 'total',      v: total },{ l: 'distribuido',v: `${pct}%` }],
+    AUDITORIA:   [{ l: 'auditados',   v: n },  { l: 'aprobados',  v: ok },  { l: 'aprobación',  v: `${pctOk}%` }],
+    ENVIO:       [{ l: 'enviados',    v: n },  { l: 'de',         v: total },{ l: 'completado', v: `${pct}%` }],
+  })[etapaId] || [{ l: 'prepacks', v: n }, { l: '', v: '' }, { l: '%', v: `${pct}%` }];
+}
+
+// ════════════════════════════════════════════════════════════════════
+// BAY GRID
+// ════════════════════════════════════════════════════════════════════
+
+function BayRow({ fila, ocsEnBahiaYEtapa, activeKey, onClickCell }) {
+  return (
+    <div className="flex items-center gap-0 mb-2">
+      <div className="w-20 shrink-0 flex items-center justify-end pr-3">
+        <span
+          className="font-mono text-[9px] font-bold uppercase tracking-industrial"
+          style={{ color: fila.color }}
+        >
+          {fila.label}
+        </span>
+      </div>
+      <div className="flex-1 flex gap-1.5 overflow-x-auto justify-center">
+        {Array.from({ length: 10 }, (_, i) => {
+          const n = i + 1;
+          const ocsB = ocsEnBahiaYEtapa(n, fila.zona);
+          const err = ocsB.some((o) => o.hasErr);
+          const key = `${fila.zona}-B${n}`;
+          const activa = activeKey === key;
+
+          return (
+            <BayCell
+              key={n}
+              bahia={n}
+              n={ocsB.length}
+              hasErr={err}
+              activa={activa}
+              ocs={ocsB}
+              shape={fila.zona === 'BAHIA' ? 'pill' : 'rect'}
+              zonaColor={fila.color}
+              onClick={() => onClickCell(n)}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function BayCell({ bahia, n, hasErr, activa, ocs, shape, zonaColor, onClick }) {
+  const vacia = n === 0;
+  const sem = vacia ? 'gris' : hasErr ? 'rojo' : 'verde';
+
+  const baseCls = shape === 'pill' ? 'rounded-full' : 'rounded-card';
+  const widthCls = 'w-[90px]';
+  const heightCls = 'min-h-[80px]';
+
+  const dotCls = {
+    verde:    'bg-flow-ring',
+    rojo:     'bg-anomaly-ring animate-[pulse-rojo_1.4s_ease-in-out_infinite]',
+    gris:     'bg-ink-300',
+  }[sem];
+
+  const bgCls = activa
+    ? 'bg-rfid/15 dark:bg-rfid/20'
+    : vacia
+      ? 'bg-ink-50 dark:bg-ink-800'
+      : hasErr
+        ? 'bg-anomaly-bg dark:bg-anomaly/15'
+        : 'bg-white dark:bg-ink-700';
+
+  const borderCls = activa
+    ? 'border-rfid border-[2.5px]'
+    : vacia
+      ? 'border-ink-100 border-2 dark:border-ink-600'
+      : hasErr
+        ? 'border-anomaly-ring/40 border-2 dark:border-anomaly-ring/40'
+        : 'border-ink-100 border-2 dark:border-ink-600';
+
+  return (
+    <button
+      type="button"
+      disabled={vacia}
+      onClick={vacia ? undefined : onClick}
+      className={
+        baseCls + ' ' + widthCls + ' ' + heightCls + ' ' + bgCls + ' ' + borderCls + ' ' +
+        'flex flex-col items-center justify-center px-1 py-2 shrink-0 transition-all ' +
+        (vacia
+          ? 'cursor-default'
+          : 'cursor-pointer hover:shadow-card-hover')
+      }
+    >
+      <div className="font-mono text-[7px] font-bold uppercase tracking-industrial text-ink-400 mb-1">
+        B-{bahia}
+      </div>
+      <div className="w-full text-center">
+        <div className={
+          'text-lg font-extrabold leading-none ' +
+          (vacia ? 'text-ink-400' : 'text-ink-700 dark:text-ink-100')
+        }>
+          {n}
+        </div>
+        <div className="text-[7px] text-ink-400 mb-1">OCs</div>
+        {n > 0 && (
+          <div className="text-[9px] text-ink-500 dark:text-ink-300">
+            {ocs.reduce((s, o) => s + (o.totalPrepacks || 0), 0)} prep.
+          </div>
+        )}
+        {hasErr && (
+          <div className="text-[8px] font-bold text-anomaly dark:text-anomaly-ring mt-0.5">
+            {ocs.filter((o) => o.hasErr).length} err
+          </div>
+        )}
+      </div>
+      {/* Status dot at top right */}
+      {!vacia && (
+        <span
+          className={
+            'absolute w-2 h-2 rounded-full ' + dotCls
+          }
+          style={{ top: 6, right: 8 }}
+        />
+      )}
+    </button>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// EXPANDABLE PANEL — appears below the bay grid when a cell is clicked
+// ════════════════════════════════════════════════════════════════════
+
+function PanelBahia({ titulo, ocs, onClose, onAbrirOC }) {
+  if (!ocs || ocs.length === 0) {
+    return (
+      <div className={
+        'mt-3.5 px-4 py-3 rounded-card border ' +
+        'bg-white border-rfid/50 shadow-card-hover ' +
+        'dark:bg-ink-700 dark:border-rfid/50 ' +
+        'animate-[entrada-panel_.2s_ease]'
+      }>
+        <div className="flex items-center justify-between">
+          <div className="text-[13px] text-ink-400">
+            Sin órdenes en {titulo}.
+          </div>
+          <CloseButton onClose={onClose} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={
+      'mt-3.5 px-4 py-3 rounded-card border shadow-card-hover ' +
+      'bg-white border-rfid/50 ' +
+      'dark:bg-ink-700 dark:border-rfid/50 ' +
+      'animate-[entrada-panel_.2s_ease]'
+    }>
+      <div className="flex justify-between items-center mb-3">
+        <div>
+          <div className="text-[14px] font-bold text-ink-700 dark:text-ink-100">
+            {titulo}
+          </div>
+          <div className="text-[11px] text-ink-400 mt-0.5">
+            {ocs.length} orden{ocs.length !== 1 ? 'es' : ''} de compra
+          </div>
+        </div>
+        <CloseButton onClose={onClose} />
+      </div>
+
+      <div className="flex gap-2.5 flex-wrap">
+        {ocs.map((oc) => (
+          <div
+            key={oc.ordenId}
+            onClick={() => onAbrirOC(oc, null)}
+            className={
+              'cursor-pointer rounded-card px-3.5 py-2.5 transition-all min-w-[180px] flex-1 border ' +
+              (oc.hasErr
+                ? 'bg-anomaly-bg/40 border-anomaly-ring/40 border-l-4 border-l-anomaly dark:bg-anomaly/15 dark:border-anomaly-ring/40 dark:border-l-anomaly-ring'
+                : 'bg-ink-50 border-ink-100 border-l-4 border-l-rfid hover:bg-rfid/5 dark:bg-ink-800 dark:border-ink-600 dark:border-l-rfid dark:hover:bg-rfid/10')
+            }
+          >
+            <div className="text-[12px] font-semibold text-ink-700 dark:text-ink-100 mb-0.5">
+              {oc.nombre}
+            </div>
+            <div className="font-mono text-[9px] text-ink-400 mb-1.5">
+              {oc.ordenId} · {oc.totalPrepacks} prepacks
+            </div>
+            <ProgressBar pct={oc.pct} hasErr={oc.hasErr} />
+            <div className="text-[9px] text-ink-400 mt-1">
+              {Math.round(oc.pct)}% procesado
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CloseButton({ onClose }) {
+  return (
+    <button
+      type="button"
+      onClick={onClose}
+      className={
+        'shrink-0 w-7 h-7 rounded flex items-center justify-center text-lg leading-none transition-colors ' +
+        'text-ink-400 hover:bg-ink-50 ' +
+        'dark:hover:bg-ink-600'
+      }
+      aria-label="Cerrar panel"
+    >
+      ×
+    </button>
+  );
+}
+
+function ProgressBar({ pct, hasErr }) {
+  const clampedPct = Math.min(100, Math.round(pct || 0));
+  return (
+    <div className="h-1 bg-ink-100 dark:bg-ink-600 rounded overflow-hidden">
+      <div
+        className={
+          'h-full transition-[width] duration-500 ' +
+          (hasErr
+            ? 'bg-anomaly dark:bg-anomaly-ring'
+            : 'bg-rfid')
+        }
+        style={{ width: `${clampedPct}%` }}
+      />
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PANEL WRAPPER
+// ════════════════════════════════════════════════════════════════════
+
+function Panel({ children }) {
+  return (
+    <div className={
+      'rounded-card border shadow-card overflow-hidden ' +
+      'bg-white border-ink-100 ' +
+      'dark:bg-ink-700 dark:border-ink-600'
+    }>
+      {children}
     </div>
   );
 }

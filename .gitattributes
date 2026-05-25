@@ -1,0 +1,15 @@
+# Force LF line endings on all text files to avoid CRLF noise on Windows + OneDrive.
+* text=auto eol=lf
+
+# Explicitly mark binary files so Git doesn't try to normalize them.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
