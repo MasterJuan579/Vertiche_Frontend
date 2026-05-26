@@ -1,34 +1,45 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  LECTURAS_INICIALES,
-  ANOMALIAS_INICIALES,
-  getContadores,
-  STAGES,
-} from '../data/demoLecturas.js';
 import { EventoRow } from '../components/EventoRow.jsx';
 import { AnomaliaAlert } from '../components/AnomaliaAlert.jsx';
+import { realApi } from '../services/realApi.js';
+import { cargarLecturasReales, LECTURAS_INICIALES, ANOMALIAS_INICIALES, getContadores } from '../data/demoLecturas.js';
 
-const FILTROS = ['TODAS', ...STAGES];
-
-/**
- * Reading log (bitácora) for the supervisor. Originally was "Lecturas en
- * Vivo" with a Socket.io feed; renamed to reflect that without sockets this
- * is a static snapshot of the most recent reads.
- *
- * Sections:
- *   - Header strip with filter pills + total count + "snapshot" badge
- *   - Left column: event stream (filterable by stage)
- *   - Right column: 4 KPI counters + recent anomalies
- *
- * Clicking an EPC navigates to /rfid/trazabilidad/:epc.
- */
 export function Bitacora() {
   const navigate = useNavigate();
   const [filtroEtapa, setFiltroEtapa] = useState('TODAS');
-  const [anomaliasShown, setAnomaliasShown] = useState(ANOMALIAS_INICIALES);
+  const [eventos, setEventos] = useState([]);
+  const [anomalias, setAnomalias] = useState([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState(null);
+  const [etapasDisponibles, setEtapasDisponibles] = useState([]);
 
-  const eventos = LECTURAS_INICIALES;
+  useEffect(() => {
+    cargarDatos();
+    const interval = setInterval(cargarDatos, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function cargarDatos() {
+    try {
+      setError(null);
+      await cargarLecturasReales();
+      
+      // Actualizar estados con los datos cargados
+      setEventos([...LECTURAS_INICIALES]);
+      setAnomalias([...ANOMALIAS_INICIALES]);
+      
+      // Extraer etapas únicas
+      const etapas = [...new Set(LECTURAS_INICIALES.map(l => l.etapa).filter(Boolean))];
+      setEtapasDisponibles(etapas);
+    } catch (err) {
+      console.error('Error cargando bitácora:', err);
+      setError('No se pudieron cargar los datos. ¿El backend está corriendo?');
+    } finally {
+      setCargando(false);
+    }
+  }
+
   const eventosFiltrados = filtroEtapa === 'TODAS'
     ? eventos
     : eventos.filter((e) => e.etapa === filtroEtapa);
@@ -48,31 +59,64 @@ export function Bitacora() {
     }
   };
 
-  const dismissAnomaly = (id) => {
-    setAnomaliasShown((prev) => prev.filter((a) => a.id !== id));
+  const dismissAnomaly = async (id) => {
+    try {
+      await realApi.resolverAnomalia?.(id);
+      setAnomalias(prev => prev.filter(a => a.id !== id));
+    } catch (error) {
+      console.error('Error:', error);
+    }
   };
+
+  const FILTROS = ['TODAS', ...etapasDisponibles];
+
+  // Estado de carga
+  if (cargando) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="text-2xl mb-2">📡</div>
+          <div className="text-ink-400">Cargando bitácora...</div>
+          <div className="text-xs text-ink-300 mt-2">Conectando con {import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="text-2xl mb-2">⚠️</div>
+          <div className="text-anomaly">{error}</div>
+          <button 
+            onClick={() => { setCargando(true); cargarDatos(); }}
+            className="mt-4 px-4 py-2 bg-rfid text-white rounded-card text-sm"
+          >
+            Reintentar
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 items-start">
 
-      {/* ════════════ EVENT STREAM ════════════ */}
+      {/* EVENT STREAM */}
       <Panel>
-        {/* Header */}
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-ink-100 dark:border-ink-600">
           <div className="flex items-center gap-2">
             <span className="font-mono text-[11px] font-bold uppercase tracking-industrial text-ink-400">
               Bitácora de lecturas
             </span>
-            <span className={
-              'text-[9px] font-bold uppercase tracking-industrial px-1.5 py-0.5 rounded ' +
-              'bg-attention-bg text-attention border border-attention-ring/40 ' +
-              'dark:bg-attention/20 dark:text-attention-ring dark:border-attention-ring/40'
-            }>
-              Snapshot
+            <span className="text-[9px] font-bold uppercase tracking-industrial px-1.5 py-0.5 rounded bg-attention-bg text-attention border border-attention-ring/40">
+              En Vivo
             </span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-flow-ring animate-[blink_1.5s_ease-in-out_infinite]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-flow-ring animate-pulse" />
             <span className="text-[11px] font-medium text-flow dark:text-flow-ring">
               {eventos.length} eventos
             </span>
@@ -86,14 +130,13 @@ export function Bitacora() {
               key={e}
               type="button"
               onClick={() => setFiltroEtapa(e)}
-              className={
-                'px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ' +
-                (filtroEtapa === e
+              className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                filtroEtapa === e
                   ? 'bg-rfid text-white border border-rfid'
-                  : 'bg-white text-ink-500 border border-ink-100 hover:bg-ink-50 dark:bg-ink-700 dark:text-ink-300 dark:border-ink-500 dark:hover:bg-ink-600')
-              }
+                  : 'bg-white text-ink-500 border border-ink-100 hover:bg-ink-50 dark:bg-ink-700 dark:text-ink-300 dark:border-ink-500 dark:hover:bg-ink-600'
+              }`}
             >
-              {e}
+              {e === 'TODAS' ? 'TODAS' : (e === 'PREREGISTRO' ? 'PRE-REG' : e)}
             </button>
           ))}
           <span className="ml-auto self-center text-[11px] text-ink-400">
@@ -101,13 +144,8 @@ export function Bitacora() {
           </span>
         </div>
 
-        {/* Table header row */}
-        <div className={
-          'grid grid-cols-[80px_1fr_120px_110px_60px] gap-2 items-center ' +
-          'px-3 py-2 border-b border-ink-100 dark:border-ink-600 ' +
-          'bg-ink-50 dark:bg-ink-800 ' +
-          'font-mono text-[10px] font-bold uppercase tracking-industrial text-ink-400'
-        }>
+        {/* Table header */}
+        <div className="grid grid-cols-[80px_1fr_120px_110px_60px] gap-2 items-center px-3 py-2 border-b border-ink-100 dark:border-ink-600 bg-ink-50 dark:bg-ink-800 font-mono text-[10px] font-bold uppercase tracking-industrial text-ink-400">
           <span>Hora</span>
           <span>EPC</span>
           <span>Lector</span>
@@ -119,6 +157,7 @@ export function Bitacora() {
         {eventosFiltrados.length === 0 ? (
           <div className="px-6 py-8 text-center text-[13px] text-ink-400">
             Sin lecturas para la etapa <strong>{filtroEtapa}</strong>.
+            <div className="text-xs mt-2">Asegúrate de que el backend tenga datos en EventoLectura</div>
           </div>
         ) : (
           <div>
@@ -134,18 +173,13 @@ export function Bitacora() {
         )}
       </Panel>
 
-      {/* ════════════ RIGHT SIDEBAR ════════════ */}
+      {/* RIGHT SIDEBAR */}
       <div className="space-y-4">
-
-        {/* KPI counters */}
         <Panel title="Contadores del turno">
           <div className="grid grid-cols-2 gap-px bg-ink-100 dark:bg-ink-600">
             {statCards.map((s) => (
-              <div
-                key={s.label}
-                className="px-4 py-3 bg-white dark:bg-ink-700"
-              >
-                <div className={'text-[24px] font-bold leading-none ' + s.accent}>
+              <div key={s.label} className="px-4 py-3 bg-white dark:bg-ink-700">
+                <div className={`text-[24px] font-bold leading-none ${s.accent}`}>
                   {s.valor}
                 </div>
                 <div className="text-[10px] uppercase tracking-industrial text-ink-400 mt-1">
@@ -156,15 +190,14 @@ export function Bitacora() {
           </div>
         </Panel>
 
-        {/* Anomalies */}
-        <Panel title={`Anomalías recientes (${anomaliasShown.length})`}>
+        <Panel title={`Anomalías recientes (${anomalias.length})`}>
           <div className="p-3 space-y-2">
-            {anomaliasShown.length === 0 ? (
+            {anomalias.length === 0 ? (
               <div className="px-4 py-4 text-center text-[13px] text-ink-400">
                 Sin anomalías recientes
               </div>
             ) : (
-              anomaliasShown.map((a) => (
+              anomalias.map((a) => (
                 <AnomaliaAlert
                   key={a.id}
                   anomalia={a}
@@ -179,17 +212,9 @@ export function Bitacora() {
   );
 }
 
-// ════════════════════════════════════════════════════════════════════
-// Helpers
-// ════════════════════════════════════════════════════════════════════
-
 function Panel({ title, children }) {
   return (
-    <div className={
-      'rounded-card border shadow-card overflow-hidden ' +
-      'bg-white border-ink-100 ' +
-      'dark:bg-ink-700 dark:border-ink-600'
-    }>
+    <div className="rounded-card border shadow-card overflow-hidden bg-white border-ink-100 dark:bg-ink-700 dark:border-ink-600">
       {title && (
         <div className="px-4 py-2.5 border-b border-ink-100 dark:border-ink-600 font-mono text-[11px] font-bold uppercase tracking-industrial text-ink-400">
           {title}

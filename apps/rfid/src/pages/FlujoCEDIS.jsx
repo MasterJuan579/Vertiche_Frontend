@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   DEMO_OCS,
   DEMO_KPI,
   ETAPAS_FLUJO,
   ETAPA_COLORS,
+  cargarDatosReales,
 } from '../data/demoOCs.js';
 import { ModalOC } from '../components/ModalOC.jsx';
 import { ModalResumenOC } from '../components/ModalResumenOC.jsx';
@@ -18,8 +19,8 @@ import { ModalResumenOC } from '../components/ModalResumenOC.jsx';
  *   3. Bay grid    — 10 bays × 3 zones (Bahías / Auditoría / Envío). Click
  *                    any cell with OCs → expandable panel with the OC list.
  *
- * In production, useEffect polls api.getOrdenes() every 8 seconds. Without
- * the API, the data is static from DEMO_OCS / DEMO_KPI.
+ * Con el backend conectado, useEffect carga datos reales cada 10 segundos.
+ * Sin backend, usa datos mock de DEMO_OCS / DEMO_KPI.
  */
 
 const ZONA_LABELS = {
@@ -37,17 +38,44 @@ const ZONA_ACCENT = {
 export function FlujoCEDIS() {
   const [pausado, setPausado] = useState(false);
   const [panelBahia, setPanelBahia] = useState(null);
+  const [ocModalOpen, setOcModalOpen] = useState(null);
+  const [ocResumenOpen, setOcResumenOpen] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState(null);
+  const [ocsData, setOcsData] = useState([]);
+  const [kpiData, setKpiData] = useState(DEMO_KPI);
 
-  // Modal state
-  const [ocModalOpen, setOcModalOpen] = useState(null);          // { oc, etapaOrigen }
-  const [ocResumenOpen, setOcResumenOpen] = useState(null);      // oc
+  // Cargar datos al inicio
+  useEffect(() => {
+    cargarDatos();
+    const interval = setInterval(() => {
+      if (!pausado) cargarDatos();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [pausado]);
 
-  const ocs = DEMO_OCS.filter((oc) => oc.etapasActivas.length > 0);
+  async function cargarDatos() {
+    try {
+      setError(null);
+      await cargarDatosReales();
+      setOcsData([...DEMO_OCS]);
+      setKpiData({ ...DEMO_KPI });
+      console.log('✅ Datos cargados:', DEMO_OCS.length, 'órdenes');
+    } catch (err) {
+      console.error('Error cargando flujo:', err);
+      setError('No se pudieron cargar los datos. Verifica que el backend esté corriendo en el puerto 3000');
+    } finally {
+      setCargando(false);
+    }
+  }
+
+  // Usar los datos cargados dinámicamente
+  const ocs = ocsData.filter((oc) => oc.etapasActivas?.length > 0);
 
   function ocsEnBahiaYEtapa(numBahia, etapa) {
     const bahiaId = `BAHIA-${numBahia}`;
     return ocs.filter((oc) =>
-      (oc.tagsPorEtapa[etapa] || []).some(
+      (oc.tagsPorEtapa?.[etapa] || []).some(
         (t) => t.tienda?.bahia_asignada === bahiaId
       )
     );
@@ -61,12 +89,43 @@ export function FlujoCEDIS() {
     setOcResumenOpen(oc);
   };
 
+  // Estado de carga
+  if (cargando) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="text-2xl mb-2">📦</div>
+          <div className="text-ink-400">Cargando flujo del CEDIS...</div>
+          <div className="text-xs text-ink-300 mt-2">Conectando con http://localhost:3000</div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="text-2xl mb-2">⚠️</div>
+          <div className="text-anomaly">{error}</div>
+          <button 
+            onClick={() => { setCargando(true); cargarDatos(); }}
+            className="mt-4 px-4 py-2 bg-rfid text-white rounded-card text-sm"
+          >
+            Reintentar
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
 
       {/* ════════════ KPI BAR ════════════ */}
       <BarraKPI
-        kpi={DEMO_KPI}
+        kpi={kpiData}
         pausado={pausado}
         onTogglePausa={() => setPausado((p) => !p)}
       />
@@ -83,12 +142,25 @@ export function FlujoCEDIS() {
             )}
             <span className="font-normal text-ink-400">— {ocs.length} OCs activas</span>
           </div>
+          <button
+            onClick={cargarDatos}
+            className="text-[10px] px-2 py-1 rounded bg-ink-50 hover:bg-ink-100 dark:bg-ink-600 dark:hover:bg-ink-500"
+          >
+            🔄 Actualizar
+          </button>
         </div>
 
         <div className="px-5 py-4">
           {ocs.length === 0 ? (
             <div className="px-6 py-10 text-center text-[13px] text-ink-400">
+              <div className="text-2xl mb-2">📭</div>
               Sin órdenes de compra activas.
+              <div className="text-xs mt-2">
+                Crea una orden desde el backend con:
+                <code className="block mt-1 text-xs bg-ink-100 p-1 rounded">
+                  POST /OrdenCompra/crearOrden
+                </code>
+              </div>
             </div>
           ) : (
             <Gantt
