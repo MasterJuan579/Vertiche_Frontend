@@ -1,0 +1,103 @@
+.skeleton {
+  animation: pulse 1.2s ease-in-out infinite;
+  background: linear-gradient(90deg, #f1f5f9, #e2e8f0, #f1f5f9);
+  background-size: 240% 100%;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+@keyframes pulse {
+  to { background-position: -240% 0; }
+}
+
+.progressWrap {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.progressTrack {
+  background: #e2e8f0;
+  border-radius: 999px;
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+}
+
+.progressValue {
+  color: #64748b;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+
+.statusBadge {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  padding: 5px 8px;
+  text-transform: uppercase;
+}
+
+.statusOk {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.statusWarning {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.statusCritical {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.statusIdle {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.kpi {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.kpiLabel {
+  color: #64748b;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kpiLine {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.kpiValue {
+  color: #18212f;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 30px;
+  font-weight: 700;
+}
+
+.kpiUnit {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.ok { color: #047857; }
+.warning { color: #b45309; }

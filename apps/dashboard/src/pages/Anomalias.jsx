@@ -1,131 +1,80 @@
-import { Card, CardBody, CardHeader, KPI, StatusPill, Table, TableHeader, TableRow, TableCell } from '@vertiche/design-system';
-import { anomalias, getProveedorById, ETAPA_COLORS } from '@vertiche/mock-data';
+import { KPIValue, StatusBadge } from '../components/common';
+import useDashboardStore from '../stores/dashboardStore';
+import { isActiveAnomaly } from '../utils/calculations';
+import { formatDateTime, getField } from '../utils/formatters';
+import styles from '../styles/global.module.css';
 
 export function Anomalias() {
-  const unresolved = anomalias.filter((a) => !a.resuelto);
-  const resolved = anomalias.filter((a) => a.resuelto);
-
-  // Group by type
+  const anomalias = useDashboardStore((state) => state.anomalias);
+  const proveedores = useDashboardStore((state) => state.proveedores);
+  const unresolved = anomalias.filter(isActiveAnomaly);
+  const resolved = anomalias.filter((a) => !isActiveAnomaly(a));
   const byType = anomalias.reduce((acc, a) => {
-    acc[a.tipo_error] = (acc[a.tipo_error] || 0) + 1;
+    const type = getField(a, ['tipo_error', 'tipo', 'codigo']);
+    acc[type] = (acc[type] || 0) + 1;
     return acc;
   }, {});
 
+  const getProveedor = (id) =>
+    proveedores.find((proveedor) => String(proveedor.id ?? proveedor.proveedor_id) === String(id));
+
   return (
-    <div className="p-8 max-w-[1400px] mx-auto">
-      <div className="mb-8">
-        <div className="label-industrial text-ink-400 mb-2">Calidad operativa</div>
-        <h1 className="font-display font-bold text-3xl text-ink-700 tracking-tight">
-          Anomalías
-        </h1>
-        <p className="text-sm text-ink-400 mt-1">
-          Eventos fuera de patrón detectados por el sistema RFID.
-        </p>
+    <main className={styles.page}>
+      <div className={styles.sectionHead}>
+        <span>Calidad operativa</span>
+        <h1>Anomalias</h1>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <Card>
-          <CardBody>
-            <KPI
-              label="Sin resolver"
-              value={unresolved.length}
-              size="lg"
-              status={unresolved.length > 2 ? 'attention' : 'flow'}
-            />
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <KPI label="Resueltas hoy" value={resolved.length} size="lg" />
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <KPI label="Total semana" value={anomalias.length} size="lg" />
-          </CardBody>
-        </Card>
-        <Card>
-          <CardBody>
-            <KPI
-              label="Tasa global"
-              value="1.4"
-              unit="%"
-              size="lg"
-              status="flow"
-            />
-          </CardBody>
-        </Card>
+      <div className={styles.metricGrid}>
+        <KPIValue label="Sin resolver" value={unresolved.length || '--'} status={unresolved.length > 0 ? 'warning' : 'ok'} />
+        <KPIValue label="Resueltas" value={resolved.length || '--'} />
+        <KPIValue label="Total" value={anomalias.length || '--'} />
+        <KPIValue label="Tipos" value={Object.keys(byType).length || '--'} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
+      <div className={styles.typeGrid}>
         {Object.entries(byType).map(([type, count]) => (
-          <Card key={type}>
-            <CardBody>
-              <div className="label-industrial text-ink-400 mb-2">{type}</div>
-              <div className="flex items-baseline gap-2">
-                <span className="font-display font-bold text-3xl text-ink-700 tabular">
-                  {count}
-                </span>
-                <span className="text-xs text-ink-400">incidencias</span>
-              </div>
-            </CardBody>
-          </Card>
+          <div className={styles.typeCard} key={type}>
+            <span>{type}</span>
+            <strong>{count}</strong>
+          </div>
         ))}
       </div>
 
-      <Card>
-        <CardHeader label="Detalle">Eventos registrados</CardHeader>
-        <Table className="!rounded-t-none !border-t-0">
-          <TableHeader>
-            <TableCell header>EPC</TableCell>
-            <TableCell header>Tipo</TableCell>
-            <TableCell header>Etapa</TableCell>
-            <TableCell header>Proveedor</TableCell>
-            <TableCell header>Descripción</TableCell>
-            <TableCell header>Estado</TableCell>
-          </TableHeader>
-          <tbody>
-            {anomalias.map((a) => {
-              const proveedor = getProveedorById(a.proveedor_id);
+      <section className={styles.tablePanel}>
+        <div className={styles.tableHeader}>Eventos registrados</div>
+        <div className={styles.table}>
+          <div className={styles.tableRowHead}>
+            <span>EPC</span>
+            <span>Tipo</span>
+            <span>Etapa</span>
+            <span>Proveedor</span>
+            <span>Estado</span>
+          </div>
+          {anomalias.length > 0 ? (
+            anomalias.map((a) => {
+              const proveedor = getProveedor(getField(a, ['proveedor_id', 'proveedorId'], null));
+              const active = isActiveAnomaly(a);
               return (
-                <TableRow key={a.id}>
-                  <TableCell>
-                    <span className="font-mono font-semibold">{a.epc}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-xs font-display font-semibold text-ink-700">
-                      {a.tipo_error}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className="label-industrial"
-                      style={{ color: ETAPA_COLORS[a.etapa] }}
-                    >
-                      {a.etapa}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-xs">{proveedor?.nombre}</span>
-                  </TableCell>
-                  <TableCell>
-                    <span className="text-xs text-ink-500">
-                      {a.descripcion}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    {a.resuelto ? (
-                      <StatusPill status="flow">RESUELTA</StatusPill>
-                    ) : (
-                      <StatusPill status="attention">PENDIENTE</StatusPill>
-                    )}
-                  </TableCell>
-                </TableRow>
+                <div className={styles.tableRow} key={a.id ?? a.epc ?? JSON.stringify(a)}>
+                  <span>{getField(a, ['epc', 'tag_epc'])}</span>
+                  <span>{getField(a, ['tipo_error', 'tipo', 'codigo'])}</span>
+                  <span>{getField(a, ['etapa', 'etapa_actual', 'bahia'])}</span>
+                  <span>{proveedor?.nombre ?? '--'}</span>
+                  <span>
+                    <StatusBadge status={active ? 'warning' : 'ok'}>
+                      {active ? 'PENDIENTE' : 'RESUELTA'}
+                    </StatusBadge>
+                    <small>{formatDateTime(getField(a, ['timestamp', 'fecha_hora', 'createdAt'], null))}</small>
+                  </span>
+                </div>
               );
-            })}
-          </tbody>
-        </Table>
-      </Card>
-    </div>
+            })
+          ) : (
+            <div className={styles.empty}>--</div>
+          )}
+        </div>
+      </section>
+    </main>
   );
 }
