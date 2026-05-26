@@ -18,7 +18,7 @@ const ACCENT = '#0F766E';
 const NAV = [
   { to: '/dashboard', label: 'Overview', end: true },
   { to: '/dashboard/throughput', label: 'Productividad' },
-  { to: '/dashboard/anomalias', label: 'Anomalias' },
+  { to: '/dashboard/anomalias', label: 'Anomalías' },
 ];
 
 const stageModals = {

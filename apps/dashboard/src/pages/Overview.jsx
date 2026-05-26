@@ -1,4 +1,3 @@
-import { AlertsDrawer } from '../components/alerts';
 import {
   CumplimientoCard,
   EstadoOperativoCard,
@@ -13,8 +12,6 @@ export function Overview() {
   const loading = useDashboardStore((state) => state.loading);
   const error = useDashboardStore((state) => state.error);
   const openModal = useDashboardStore((state) => state.openModal);
-  const drawerOpen = useDashboardStore((state) => state.drawerOpen);
-  const closeDrawer = useDashboardStore((state) => state.closeDrawer);
 
   return (
     <main className={styles.page}>
@@ -26,7 +23,6 @@ export function Overview() {
       </div>
       <ThroughputChart />
       <StagesGrid onStageClick={openModal} />
-      <AlertsDrawer isOpen={drawerOpen} onClose={closeDrawer} />
     </main>
   );
 }

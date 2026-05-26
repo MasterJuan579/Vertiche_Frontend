@@ -22,7 +22,7 @@ export function Anomalias() {
     <main className={styles.page}>
       <div className={styles.sectionHead}>
         <span>Calidad operativa</span>
-        <h1>Anomalias</h1>
+        <h1>Anomalías</h1>
       </div>
 
       <div className={styles.metricGrid}>
