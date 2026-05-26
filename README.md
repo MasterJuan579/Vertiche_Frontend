@@ -227,4 +227,6 @@ Cuando el backend esté disponible, basta con reemplazar los imports de `@vertic
 
 ---
 
+# Hola
+
 Hecho con cuidado por el equipo Vertiche · Tec de Monterrey CEM · 2026
