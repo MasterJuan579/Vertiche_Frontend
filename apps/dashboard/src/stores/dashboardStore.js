@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
+import { isActiveAnomaly } from '../utils/calculations';
 
 const useDashboardStore = create(
   devtools(
@@ -31,7 +32,7 @@ const useDashboardStore = create(
       openModal: (key) => set({ modalOpen: true, modalKey: key }),
       closeModal: () => set({ modalOpen: false, modalKey: null }),
 
-      getAnomaliasActivas: () => get().anomalias.filter((a) => !a.resuelto),
+      getAnomaliasActivas: () => get().anomalias.filter(isActiveAnomaly),
       getTagsByEtapa: (etapa) =>
         get().tags.filter((t) => t.etapa_actual === etapa),
       getCajasByEstado: (estado) => get().cajas.filter((c) => c.estado === estado),
