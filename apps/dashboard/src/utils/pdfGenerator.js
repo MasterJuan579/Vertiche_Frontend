@@ -1,6 +1,3 @@
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
-
 export async function generarPDF(element, filename = 'reporte-vertiche.pdf', options = {}) {
   const {
     orientation = 'portrait',
@@ -9,6 +6,11 @@ export async function generarPDF(element, filename = 'reporte-vertiche.pdf', opt
     scale = 2,
     quality = 0.95,
   } = options;
+
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+    import('html2canvas'),
+    import('jspdf'),
+  ]);
 
   const canvas = await html2canvas(element, {
     scale,
