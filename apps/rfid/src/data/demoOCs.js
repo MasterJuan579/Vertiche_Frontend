@@ -2,7 +2,7 @@
 import { realApi } from '../services/realApi';
 
 // ============================================
-// CONSTANTES (NO CAMBIAN)
+// CONSTANTES
 // ============================================
 
 export const ETAPAS_FLUJO = [
@@ -51,28 +51,42 @@ export let DEMO_KPI = {
 };
 
 // ============================================
-// FUNCIÓN PARA CARGAR DATOS DEL BACKEND
+// FUNCIÓN PARA CARGAR DATOS REALES DEL BACKEND
 // ============================================
 
 export async function cargarDatosReales() {
   try {
-    const [ocs, stats] = await Promise.all([
-      realApi.getOrdenesCompra(),
-      realApi.getEstadisticas()
-    ]);
+    // Obtener órdenes del backend
+    const ocs = await realApi.getOrdenesCompra();
     
+    console.log('📦 Órdenes recibidas del backend:', ocs);
+    
+    if (!ocs || ocs.length === 0) {
+      console.warn('No hay órdenes en el backend');
+      DEMO_OCS.length = 0;
+      return false;
+    }
+    
+    // Usar los datos que ya vienen del backend (con etapasActivas, tagsPorEtapa, etc.)
     DEMO_OCS.length = 0;
     DEMO_OCS.push(...ocs);
+    
+    // Calcular KPI básico desde las órdenes
+    const totalOrdenes = ocs.length;
+    const ordenesCompletadas = ocs.filter((oc) => oc.estado === 'COMPLETADA').length;
+    const pctCompletadas = totalOrdenes > 0 ? (ordenesCompletadas / totalOrdenes) * 100 : 0;
     
     DEMO_KPI = {
       mejora_porcentaje: 30.6,
       objetivo_mejora_pct: 32,
-      tiempo_promedio_hoy_min: stats.tiempo_promedio || 125,
-      palets_activos: stats.total_tags || ocs.length,
-      palets_completados_hoy: stats.palets_completados_hoy || 0
+      tiempo_promedio_hoy_min: 125,
+      palets_activos: totalOrdenes,
+      palets_completados_hoy: ordenesCompletadas
     };
     
-    console.log(`✅ Cargadas ${ocs.length} órdenes de compra`);
+    console.log(`✅ Cargadas ${DEMO_OCS.length} órdenes de compra`);
+    console.log('Primera orden:', DEMO_OCS[0]);
+    
     return true;
   } catch (error) {
     console.error('Error cargando datos reales:', error);
@@ -81,11 +95,11 @@ export async function cargarDatosReales() {
 }
 
 // ============================================
-// FUNCIONES AUXILIARES (mantienen compatibilidad)
+// FUNCIONES AUXILIARES
 // ============================================
 
 export function getOC(ordenId) {
-  return DEMO_OCS.find((oc) => oc.ordenId === ordenId);
+  return DEMO_OCS.find((oc) => oc.orden_id === ordenId);
 }
 
 export function getOCsInBay(numBahia, etapa) {
@@ -99,7 +113,12 @@ export function getOCsInBay(numBahia, etapa) {
 
 export function getAllPrepacks() {
   return DEMO_OCS.flatMap((oc) =>
-    oc.tags.map((t) => ({ ...t, ordenId: oc.ordenId, ocNombre: oc.nombre, proveedor: oc.proveedor }))
+    (oc.tags || []).map((t) => ({ 
+      ...t, 
+      ordenId: oc.orden_id, 
+      ocNombre: oc.nombre_producto, 
+      proveedor: oc.Proveedor?.nombre 
+    }))
   );
 }
 
@@ -108,7 +127,7 @@ export function getPrepackByEpc(epc) {
 }
 
 // ============================================
-// COLORES (mantienen compatibilidad)
+// COLORES
 // ============================================
 
 const COLORES_CSS = {

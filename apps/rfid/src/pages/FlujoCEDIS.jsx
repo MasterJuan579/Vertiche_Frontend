@@ -69,8 +69,13 @@ export function FlujoCEDIS() {
     }
   }
 
-  // Usar los datos cargados dinámicamente
-  const ocs = ocsData.filter((oc) => oc.etapasActivas?.length > 0);
+  console.log('🔍 DEMO_OCS antes del filtro:', DEMO_OCS);
+  console.log('🔍 Longitud:', DEMO_OCS.length);
+
+  const ocs = DEMO_OCS.filter((oc) => oc.ordenId);
+
+  console.log('🔍 OCs después del filtro:', ocs);
+
 
   function ocsEnBahiaYEtapa(numBahia, etapa) {
     const bahiaId = `BAHIA-${numBahia}`;
