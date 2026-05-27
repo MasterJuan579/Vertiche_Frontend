@@ -1,0 +1,59 @@
+.heroCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  min-height: 178px;
+  padding: 20px;
+}
+
+.cardLabel {
+  color: #64748b;
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bigMetric {
+  color: #18212f;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 38px;
+  font-weight: 700;
+  line-height: 1.1;
+  margin-top: 12px;
+}
+
+.cardText {
+  color: #64748b;
+  font-size: 13px;
+  margin: 8px 0 16px;
+}
+
+.statusLine {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.statusDot {
+  border-radius: 999px;
+  height: 16px;
+  width: 16px;
+}
+
+.ok {
+  background: #10b981;
+}
+
+.warning {
+  background: #f59e0b;
+}
+
+.critical {
+  background: #dc2626;
+}
+
+.idle {
+  background: #94a3b8;
+}
