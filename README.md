@@ -60,6 +60,7 @@ Solo `apps/web/` tiene `vite.config.js`, `tailwind.config.js`, `index.html` y `v
 - **npm workspaces** para gestión del monorepo
 - **Vercel** para hosting (un solo proyecto)
 - **GitHub Actions** para sincronización automática entre ramas
+- **Zustand + Chart.js + PDF export** en el módulo `dashboard`
 
 ---
 
@@ -82,6 +83,18 @@ npm run dev          # http://localhost:5173
 ```
 
 Un solo comando levanta el shell con todos los módulos montados. No hace falta arrancar cada módulo por separado.
+
+El dashboard consume el backend con `VITE_API_URL`. Como Vite se ejecuta desde `apps/web`, crea el archivo local ahí:
+
+```bash
+cp apps/web/.env.example apps/web/.env
+```
+
+Valor esperado para desarrollo local:
+
+```env
+VITE_API_URL=http://localhost:8080
+```
 
 ### Probar el flujo end-to-end
 
@@ -117,12 +130,17 @@ El `cd ../..` salta a la raíz del monorepo antes de correr el comando — neces
 
 ### Variables de entorno
 
-No se requieren variables de entorno mientras la autenticación esté mockeada. Cuando se integre AWS Cognito, agregar en Vercel (Settings → Environment Variables, separadas para Production y Preview):
+Para el módulo `dashboard` se requiere la URL del backend:
+
+```
+VITE_API_URL
+```
+
+Cuando se integre AWS Cognito, agregar también en Vercel (Settings → Environment Variables, separadas para Production y Preview):
 
 ```
 VITE_COGNITO_USER_POOL_ID
 VITE_COGNITO_CLIENT_ID
-VITE_API_BASE_URL
 ```
 
 El prefijo `VITE_` es obligatorio: Vite solo expone al cliente las variables que lo tengan.
@@ -158,7 +176,7 @@ Una GitHub Action corre todos los días a las 03:00 CDMX (`0 9 * * *` UTC) y sin
 |-------------|----------------|-----------|
 | `SUPERVISOR` | rfid | Flujo del CEDIS (Gantt con 25 OCs activas + grid de 10 bahías en 3 zonas), bitácora de lecturas con filtros por etapa, trazabilidad EPC con timeline horizontal y registro de tags RFID |
 | `BAY_OPERATOR` | sorter | Vista de sorter en vivo (con alerta dramática "Error de Sorter" para prepacks mal direccionados), directorio de las 10 bahías y vista por bahía con 3 estaciones más panel de detalle del prepack |
-| `OPS_MANAGER` | dashboard | KPIs ejecutivos, productividad, anomalías |
+| `OPS_MANAGER` | dashboard | Operación en vivo conectada a API, throughput, etapas RFID, anomalías y exportación PDF |
 | `QA_INSPECTOR` | proveedores | Pantalla de inspección (flujo de siniestros en 3 pasos), resumen del turno, plan de muestreo y ficha detallada por proveedor con historial QA |
 
 El rol está en el claim `custom:role` del JWT (alineado con la práctica estándar de Cognito).
@@ -213,7 +231,7 @@ El shell ya envuelve toda la app en `<ThemeProvider>`, y `<ThemeToggle />` vive 
 - 5 `anomalias` recientes
 - 7 estadios del proceso RFID
 
-Cuando el backend esté disponible, basta con reemplazar los imports de `@vertiche/mock-data` por llamadas a `fetch(...)` en cada vista. La forma de los datos no cambia.
+El módulo `dashboard` ya consume la API real mediante `VITE_API_URL` y no usa `@vertiche/mock-data`. Los demás módulos todavía pueden usar datos mock mientras migran por equipo.
 
 ---
 
@@ -226,5 +244,7 @@ Cuando el backend esté disponible, basta con reemplazar los imports de `@vertic
 - [ ] Agregar pruebas E2E con Playwright
 
 ---
+
+# Hola
 
 Hecho con cuidado por el equipo Vertiche · Tec de Monterrey CEM · 2026
