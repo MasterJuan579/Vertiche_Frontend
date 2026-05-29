@@ -21,7 +21,7 @@ export function KPI({
     anomaly: 'text-anomaly',
   };
 
-  const numberColor = status ? statusColor[status] : 'text-ink-700';
+  const numberColor = status ? statusColor[status] : 'text-ink-700 dark:text-ink-100';
 
   return (
     <div className="relative">
@@ -31,11 +31,11 @@ export function KPI({
           style={{ background: accent }}
         />
       )}
-      <div className="label-industrial text-ink-400 mb-2">{label}</div>
+      <div className="label-industrial text-ink-400 dark:text-ink-300 mb-2">{label}</div>
       <div className="flex items-baseline gap-2">
         <span className={`font-display tabular ${sizeMap[size]} ${numberColor}`}>{value}</span>
         {unit && (
-          <span className="text-ink-400 font-display font-medium text-sm uppercase tracking-industrial">
+          <span className="text-ink-400 dark:text-ink-300 font-display font-medium text-sm uppercase tracking-industrial">
             {unit}
           </span>
         )}
@@ -49,7 +49,7 @@ export function KPI({
           >
             {trend > 0 ? '▲' : trend < 0 ? '▼' : '—'} {Math.abs(trend)}%
           </span>
-          <span className="text-ink-400">{trendLabel}</span>
+          <span className="text-ink-400 dark:text-ink-300">{trendLabel}</span>
         </div>
       )}
     </div>

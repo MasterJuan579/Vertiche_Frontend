@@ -16,9 +16,20 @@ export {
   AuthProvider,
   useAuth,
   RequireRole,
-  mockSignIn,
   ROLE_HOMES,
 } from './auth.jsx';
 
 // Theme exports — dark/light mode
 export { ThemeProvider, useTheme } from './theme.jsx';
+
+// Cognito client — raw-fetch auth actions
+export {
+  initiateAuth,
+  respondToNewPasswordChallenge,
+  globalSignOut,
+  refreshTokens,
+  cognitoConfig,
+} from './cognito.js';
+
+// Authenticated backend client
+export { apiFetch, apiGet, apiPost, apiDelete } from './api.js';
