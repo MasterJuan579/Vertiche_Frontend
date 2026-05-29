@@ -137,13 +137,33 @@ export const realApi = {
   },
 
   // ============================================
-  // CREAR OC + PEDIDO + PALET en un solo paso
+  // CREAR OC completa: Pedido + OC + N Palets + M DetalleOrden + Tags placeholder
   // (endpoint del módulo RFID)
   // ============================================
-  crearOrdenCompra({ proveedor_id, nombre_producto, modelo, total_esperados }) {
+  crearOrdenCompra({ proveedor_id, nombre_producto, modelo, numero_palets, detalles }) {
     return request('/rfid/orden-compra', {
       method: 'POST',
-      body: { proveedor_id, nombre_producto, modelo, total_esperados },
+      body: { proveedor_id, nombre_producto, modelo, numero_palets, detalles },
     });
+  },
+
+  // Lista de prepacks (pendientes + asignados) de una OC.
+  getPrepacksDeOrden(orden_id) {
+    return request(`/rfid/orden/${encodeURIComponent(orden_id)}/prepacks`);
+  },
+
+  // Asigna el EPC real a un prepack placeholder.
+  asignarEpc({ epc_placeholder, epc_real }) {
+    return request('/rfid/asignar-epc', {
+      method: 'POST',
+      body: { epc_placeholder, epc_real },
+    });
+  },
+
+  // ============================================
+  // ÓRDENES DE COMPRA listar (atajo a OrdenCompra/listarOrdenes)
+  // ============================================
+  getOrdenes() {
+    return request('/OrdenCompra/listarOrdenes');
   },
 };
