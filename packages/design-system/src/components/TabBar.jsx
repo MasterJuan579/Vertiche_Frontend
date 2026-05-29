@@ -1,28 +1,19 @@
-export function TabBar({ tabs, activeId, onSelect, accent }) {
+export function TabBar({ tabs = [], activeTab, onChange, className = '' }) {
   return (
-    <div className="flex gap-1 border-b border-ink-100 bg-white px-6">
+    <div className={`flex border-b border-ink-100 dark:border-ink-800 ${className}`}>
       {tabs.map((tab) => {
-        const active = tab.id === activeId;
+        const isActive = tab.id === activeTab;
         return (
           <button
             key={tab.id}
-            onClick={() => onSelect(tab.id)}
-            className={`relative px-4 py-3 text-sm font-display font-semibold transition-colors ${
-              active ? 'text-ink-700' : 'text-ink-400 hover:text-ink-700'
+            onClick={() => onChange(tab.id)}
+            className={`px-4 py-2.5 font-display text-xs font-semibold uppercase tracking-industrial border-b-2 -mb-[2px] transition-colors ${
+              isActive
+                ? 'border-ink-700 text-ink-700 dark:border-white dark:text-white'
+                : 'border-transparent text-ink-400 hover:text-ink-700 dark:text-ink-300 dark:hover:text-white'
             }`}
           >
             {tab.label}
-            {tab.badge !== undefined && (
-              <span className="ml-2 text-[10px] font-mono text-ink-400 tabular">
-                {tab.badge}
-              </span>
-            )}
-            {active && (
-              <span
-                className="absolute bottom-0 left-2 right-2 h-[2px] rounded-t"
-                style={{ background: accent || '#161B23' }}
-              />
-            )}
           </button>
         );
       })}

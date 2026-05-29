@@ -10,11 +10,11 @@ export function AppShell({
   children,
 }) {
   return (
-    <div className="min-h-screen bg-ink-50 flex">
+    <div className="min-h-screen bg-ink-50 text-ink-700 dark:bg-ink-900 dark:text-ink-50 flex transition-colors duration-200">
       {/* Sidebar */}
-      <aside className="w-60 bg-white border-r border-ink-100 flex flex-col flex-shrink-0">
+      <aside className="w-60 bg-white border-r border-ink-100 flex flex-col flex-shrink-0 dark:bg-ink-800 dark:border-ink-700 transition-colors">
         {/* Brand block */}
-        <div className="px-5 py-5 border-b border-ink-100">
+        <div className="px-5 py-5 border-b border-ink-100 dark:border-ink-700">
           <div className="flex items-center gap-2.5">
             <div
               className="w-9 h-9 rounded-md flex items-center justify-center font-display font-bold text-white text-sm"
@@ -23,10 +23,10 @@ export function AppShell({
               V
             </div>
             <div>
-              <div className="font-display font-bold text-ink-700 text-sm leading-none">
+              <div className="font-display font-bold text-ink-700 text-sm leading-none dark:text-ink-50">
                 Vertiche
               </div>
-              <div className="text-[10px] text-ink-400 font-display font-medium uppercase tracking-industrial mt-1">
+              <div className="text-[10px] text-ink-400 font-display font-medium uppercase tracking-industrial mt-1 dark:text-ink-300">
                 SortFlow
               </div>
             </div>
@@ -47,11 +47,9 @@ export function AppShell({
               to={item.to}
               end={item.end}
               className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2 rounded-card text-sm font-medium mb-0.5 transition-colors ${
-                  isActive
-                    ? 'bg-ink-50 text-ink-700'
-                    : 'text-ink-400 hover:text-ink-700 hover:bg-ink-50'
-                }`
+                isActive
+                  ? 'flex items-center gap-2.5 px-3 py-2 rounded-card text-sm font-medium mb-0.5 transition-colors bg-ink-100 text-ink-700 dark:bg-ink-700 dark:text-ink-50'
+                  : 'flex items-center gap-2.5 px-3 py-2 rounded-card text-sm font-medium mb-0.5 transition-colors text-ink-400 hover:text-ink-700 hover:bg-ink-50 dark:text-ink-300 dark:hover:text-ink-50 dark:hover:bg-ink-700'
               }
             >
               <span className="w-1 h-1 rounded-full bg-current" />
@@ -65,10 +63,10 @@ export function AppShell({
           <div className="border-t border-ink-100 px-4 py-3 dark:border-ink-700">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-xs font-display font-semibold text-ink-700 truncate dark:text-ink-100">
+                <div className="text-xs font-display font-semibold text-ink-700 truncate dark:text-ink-50">
                   {user.name}
                 </div>
-                <div className="text-[10px] text-ink-400 uppercase tracking-industrial font-display font-medium mt-0.5">
+                <div className="text-[10px] text-ink-400 uppercase tracking-industrial font-display font-medium mt-0.5 dark:text-ink-300">
                   {user.role}
                 </div>
               </div>
@@ -77,7 +75,7 @@ export function AppShell({
                 {onLogout && (
                   <button
                     onClick={onLogout}
-                    className="text-[10px] text-ink-400 hover:text-anomaly font-display font-semibold uppercase tracking-industrial"
+                    className="text-[10px] text-ink-400 hover:text-anomaly font-display font-semibold uppercase tracking-industrial dark:text-ink-300 dark:hover:text-anomaly"
                   >
                     Salir
                   </button>
@@ -89,7 +87,7 @@ export function AppShell({
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-x-hidden">
+      <main className="flex-1 overflow-x-hidden bg-ink-50 dark:bg-ink-900 p-6 transition-colors">
         {children}
       </main>
     </div>

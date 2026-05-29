@@ -1,25 +1,27 @@
+import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+
+// Importación del flujo de Autenticación y Roles corporativos
+import { LoginPage } from '../../auth/src/pages/LoginPage.jsx';
+import { RolePickerPage } from '../../auth/src/pages/RolePickerPage.jsx';
+
+// Importación de Módulos
+import { DashboardModule } from '../../dashboard/src/index.jsx';
+import { SorterModule } from '../../sorter/src/index.jsx';
+import { RfidModule } from '../../rfid/src/index.jsx';
+import { ProveedoresModule } from '../../proveedores/src/index.jsx';
+
+// Importación de Layout / Shell global y Guard de autenticación
 import { RequireRole } from '@vertiche/design-system';
-
-// Auth pages (login + demo role picker)
-import { LoginPage, RolePickerPage } from 'auth';
-
-// Per-role modules
-import { RfidModule } from 'rfid';
-import { SorterModule } from 'sorter';
-import { DashboardModule } from 'dashboard';
-import { ProveedoresModule } from 'proveedores';
 
 export default function App() {
   return (
     <Routes>
-      {/* Public auth routes */}
-      <Route path="/" element={<LoginPage />} />
+      {/* Rutas públicas sin protección */}
+      <Route path="/login" element={<LoginPage />} />
       <Route path="/select-role" element={<RolePickerPage />} />
 
-      {/* Role-gated modules. The "/*" wildcard lets each module own its
-          internal routing. RequireRole redirects to login if no session,
-          or to the user's own module if their role doesn't match. */}
+      {/* Módulo RFID - Supervisión */}
       <Route
         path="/rfid/*"
         element={
@@ -28,14 +30,8 @@ export default function App() {
           </RequireRole>
         }
       />
-      <Route
-        path="/sorter/*"
-        element={
-          <RequireRole role="BAY_OPERATOR">
-            <SorterModule />
-          </RequireRole>
-        }
-      />
+
+      {/* Módulo de Dashboard Protegido */}
       <Route
         path="/dashboard/*"
         element={
@@ -44,6 +40,18 @@ export default function App() {
           </RequireRole>
         }
       />
+
+      {/* Módulo de Sorter & Bahías Protegido */}
+      <Route
+        path="/sorter/*"
+        element={
+          <RequireRole role="BAY_OPERATOR">
+            <SorterModule />
+          </RequireRole>
+        }
+      />
+
+      {/* Módulo Proveedores - Calidad QA */}
       <Route
         path="/proveedores/*"
         element={
@@ -53,8 +61,8 @@ export default function App() {
         }
       />
 
-      {/* Unknown paths bounce to login. */}
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {/* Caída por defecto al entrar al dominio */}
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
 }

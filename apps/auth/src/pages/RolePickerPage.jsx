@@ -47,30 +47,30 @@ export function RolePickerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-ink-50 flex items-center justify-center p-6">
+    <div className="min-h-screen bg-ink-50 dark:bg-ink-900 flex items-center justify-center p-6">
       <div className="w-full max-w-4xl">
         <div className="text-center mb-10">
           <div className="inline-flex items-center gap-2.5 mb-6">
-            <div className="w-10 h-10 rounded-md bg-ink-700 flex items-center justify-center font-display font-bold text-white">
+            <div className="w-10 h-10 rounded-md bg-ink-700 dark:bg-ink-700 flex items-center justify-center font-display font-bold text-white">
               V
             </div>
             <div className="text-left">
-              <div className="font-display font-bold text-ink-700 leading-none">
+              <div className="font-display font-bold text-ink-700 dark:text-ink-50 leading-none">
                 Vertiche
               </div>
-              <div className="text-[10px] text-ink-400 font-display font-medium uppercase tracking-industrial mt-1">
+              <div className="text-[10px] text-ink-400 dark:text-ink-400 font-display font-medium uppercase tracking-industrial mt-1">
                 SortFlow
               </div>
             </div>
           </div>
 
-          <div className="label-industrial text-ink-400 mb-2">
+          <div className="label-industrial text-ink-400 dark:text-ink-400 mb-2">
             Modo demostración
           </div>
-          <h1 className="font-display font-bold text-3xl text-ink-700 mb-2">
+          <h1 className="font-display font-bold text-3xl text-ink-700 dark:text-ink-50 mb-2">
             ¿Cuál es tu rol hoy?
           </h1>
-          <p className="text-sm text-ink-400 max-w-md mx-auto">
+          <p className="text-sm text-ink-400 dark:text-ink-300 max-w-md mx-auto">
             En producción, AWS Cognito determinaría tu rol automáticamente. Para
             la demo, elige el módulo que quieres ver.
           </p>
@@ -81,7 +81,7 @@ export function RolePickerPage() {
             <button
               key={role.key}
               onClick={() => handleSelect(role.key)}
-              className="group relative bg-white rounded-card shadow-card border border-ink-100 p-6 text-left hover:shadow-card-hover transition-all hover:-translate-y-0.5"
+              className="group relative bg-white dark:bg-ink-800 rounded-card shadow-card border border-ink-100 dark:border-ink-700 p-6 text-left hover:shadow-card-hover transition-all hover:-translate-y-0.5"
             >
               <div
                 className="absolute top-0 left-0 right-0 h-1 rounded-t-card"
@@ -94,14 +94,14 @@ export function RolePickerPage() {
                 >
                   {role.module}
                 </div>
-                <span className="text-ink-300 group-hover:text-ink-700 transition-colors font-mono text-sm">
+                <span className="text-ink-300 dark:text-ink-400 group-hover:text-ink-700 dark:group-hover:text-ink-100 transition-colors font-mono text-sm">
                   →
                 </span>
               </div>
-              <h3 className="font-display font-bold text-lg text-ink-700 mb-1">
+              <h3 className="font-display font-bold text-lg text-ink-700 dark:text-ink-50 mb-1">
                 {role.label}
               </h3>
-              <p className="text-sm text-ink-400 leading-relaxed">
+              <p className="text-sm text-ink-400 dark:text-ink-300 leading-relaxed">
                 {role.description}
               </p>
             </button>
