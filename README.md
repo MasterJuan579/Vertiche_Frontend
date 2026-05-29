@@ -13,7 +13,8 @@ Trazabilidad RFID en tiempo real para el centro de distribución (CEDIS) de una 
 │           apps/web  ──  shell único, una sola URL             │
 │                                                               │
 │   /                  → login                                  │
-│   /select-role       → selector de rol (modo demo)            │
+│   /nueva-contrasena  → cambio de contraseña (primer ingreso)  │
+│   /admin/*           → ADMIN         (apps/admin)            │
 │   /rfid/*            → SUPERVISOR    (apps/rfid)              │
 │   /sorter/*          → BAY_OPERATOR  (apps/sorter)            │
 │   /dashboard/*       → OPS_MANAGER   (apps/dashboard)         │
@@ -23,7 +24,28 @@ Trazabilidad RFID en tiempo real para el centro de distribución (CEDIS) de una 
 
 El shell monta cada módulo bajo su prefijo y lo envuelve en `<RequireRole role="...">`. Un usuario autenticado que intente entrar a un módulo que no le corresponde es redirigido a su propio módulo. Sin sesión, todo redirige a `/`.
 
-La sesión vive en un `AuthProvider` (React context) que persiste en `sessionStorage`. En producción, `mockSignIn` se reemplaza con una llamada real a AWS Cognito — el resto del flujo no cambia porque la forma del session (`{ token, user: { sub, email, name, role } }`) es la misma que devuelve Cognito.
+La sesión vive en un `AuthProvider` (React context) que persiste en `sessionStorage`. El login real usa AWS Cognito (flujo `USER_PASSWORD_AUTH`, vía `fetch` directo) y luego consulta `GET /Auth/me` para resolver el rol desde MySQL. La sesión tiene la forma `{ idToken, accessToken, refreshToken, user: { sub, email, role, nombre } }`.
+
+---
+
+## Autenticación
+
+Integración real de AWS Cognito + backend. Roles y su módulo destino:
+
+- `ADMIN` → `/admin`
+- `SUPERVISOR` → `/rfid`
+- `BAY_OPERATOR` → `/sorter`
+- `OPS_MANAGER` → `/dashboard`
+- `QA_INSPECTOR` → `/proveedores`
+
+El rol **no** vive en Cognito: lo determina el backend desde la tabla `Usuario` de MySQL y se obtiene con `GET /Auth/me`. Cada endpoint protegido re-verifica el token y el rol. El alta de usuarios está deshabilitada en Cognito; solo un `ADMIN` puede crear cuentas desde el módulo `/admin` (`POST /Auth/registrar`).
+
+Configuración local:
+
+1. Copia `apps/web/.env.example` a `apps/web/.env.local`.
+2. Completa las variables de Cognito (`VITE_COGNITO_*`) y `VITE_API_URL`.
+3. `npm install && npm run dev`.
+4. El backend debe estar corriendo en `VITE_API_URL`.
 
 ---
 
@@ -33,7 +55,8 @@ La sesión vive en un `AuthProvider` (React context) que persiste en `sessionSto
 vertiche-frontend/
 ├── apps/
 │   ├── web/             Shell único (Vite, Tailwind, Vercel target)
-│   ├── auth/            Páginas de login + selector de rol
+│   ├── auth/            Páginas de login + cambio de contraseña
+│   ├── admin/           Módulo del administrador (gestión de usuarios)
 │   ├── rfid/            Módulo del supervisor
 │   ├── sorter/          Módulo del operador de bahía
 │   ├── dashboard/       Módulo del gerente operativo
@@ -46,7 +69,7 @@ vertiche-frontend/
         └── sync-branches.yml   Sincronización automática staging → team-*
 ```
 
-Solo `apps/web/` tiene `vite.config.js`, `tailwind.config.js`, `index.html` y `vercel.json`. Los cuatro módulos (`auth`, `rfid`, `sorter`, `dashboard`, `proveedores`) son librerías que exportan un componente — el shell los importa y monta.
+Solo `apps/web/` tiene `vite.config.js`, `tailwind.config.js`, `index.html` y `vercel.json`. Los módulos (`auth`, `admin`, `rfid`, `sorter`, `dashboard`, `proveedores`) son librerías que exportan un componente — el shell los importa y monta.
 
 `npm workspaces` resuelve los paquetes locales (`@vertiche/design-system`, `@vertiche/mock-data`) sin necesidad de publicar a npm.
 
@@ -238,7 +261,7 @@ El módulo `dashboard` ya consume la API real mediante `VITE_API_URL` y no usa `
 ## Roadmap inmediato
 
 - [ ] Conectar el módulo `rfid` con el endpoint `/api/palets` del backend
-- [ ] Reemplazar `mockSignIn(...)` con AWS Cognito real
+- [ ] Proteger los controladores restantes del backend con `verifyToken` + `requireRole`
 - [ ] Configurar dominio custom (`vertiche.mx`)
 - [ ] Agregar Vitest + una prueba de smoke por módulo
 - [ ] Agregar pruebas E2E con Playwright

@@ -46,7 +46,7 @@ export function DashboardModule() {
       moduleName="Dashboard"
       moduleAccent={ACCENT}
       navItems={NAV}
-      user={{ name: session.user.name, role: 'Gerente Operativo' }}
+      user={{ name: session.user.nombre, role: 'Gerente Operativo' }}
       onLogout={signOut}
     >
       <Topbar onRefresh={refresh} refreshing={loading} />

@@ -17,6 +17,7 @@ export default {
     '../sorter/src/**/*.{js,jsx}',
     '../dashboard/src/**/*.{js,jsx}',
     '../proveedores/src/**/*.{js,jsx}',
+    '../admin/src/**/*.{js,jsx}',
     '../../packages/design-system/src/**/*.{js,jsx}',
   ],
 };

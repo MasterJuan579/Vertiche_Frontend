@@ -24,7 +24,7 @@ export function RfidModule() {
       moduleName="Supervisión RFID"
       moduleAccent={ACCENT}
       navItems={NAV}
-      user={{ name: session.user.name, role: 'Supervisor CEDIS' }}
+      user={{ name: session.user.nombre, role: 'Supervisor CEDIS' }}
       onLogout={signOut}
     >
       <Routes>
