@@ -2,7 +2,7 @@ const variants = {
   flow: 'bg-flow-bg text-flow border-flow/20',
   attention: 'bg-attention-bg text-attention border-attention/20',
   anomaly: 'bg-anomaly-bg text-anomaly border-anomaly/20',
-  neutral: 'bg-ink-50 text-ink-500 border-ink-200',
+  neutral: 'bg-ink-50 dark:bg-ink-600 text-ink-500 dark:text-ink-300 border-ink-200 dark:border-ink-500',
 };
 
 export function StatusPill({ status = 'neutral', children, icon, className = '' }) {

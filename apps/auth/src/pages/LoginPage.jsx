@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button } from '@vertiche/design-system';
+import { Button, ThemeToggle } from '@vertiche/design-system';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -14,7 +14,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-ink-50 flex">
+    <div className="min-h-screen bg-ink-50 dark:bg-ink-900 flex">
       {/* Left panel: branding */}
       <div className="hidden md:flex md:w-1/2 lg:w-3/5 bg-ink-700 text-white p-12 relative overflow-hidden">
         {/* Subtle grid background */}
@@ -67,7 +67,10 @@ export function LoginPage() {
       </div>
 
       {/* Right panel: form */}
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex-1 flex items-center justify-center p-8 relative">
+        <div className="absolute top-6 right-6">
+          <ThemeToggle />
+        </div>
         <div className="w-full max-w-sm">
           <div className="md:hidden mb-8">
             <div className="w-10 h-10 rounded-md bg-ink-700 flex items-center justify-center font-display font-bold text-white">
@@ -75,13 +78,13 @@ export function LoginPage() {
             </div>
           </div>
 
-          <div className="label-industrial text-ink-400 mb-2">
+          <div className="label-industrial text-ink-400 dark:text-ink-300 mb-2">
             Inicio de sesión
           </div>
-          <h2 className="font-display font-bold text-2xl text-ink-700 mb-1">
+          <h2 className="font-display font-bold text-2xl text-ink-700 dark:text-ink-100 mb-1">
             Bienvenido de vuelta.
           </h2>
-          <p className="text-sm text-ink-400 mb-8">
+          <p className="text-sm text-ink-400 dark:text-ink-300 mb-8">
             Ingresa con tu cuenta corporativa de Vertiche.
           </p>
 
@@ -89,7 +92,7 @@ export function LoginPage() {
             <div>
               <label
                 htmlFor="email"
-                className="label-industrial text-ink-400 mb-1.5 block"
+                className="label-industrial text-ink-400 dark:text-ink-300 mb-1.5 block"
               >
                 Correo
               </label>
@@ -99,7 +102,7 @@ export function LoginPage() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="nombre@vertiche.mx"
-                className="w-full px-3 py-2.5 bg-white border border-ink-200 rounded-card text-sm text-ink-700 placeholder-ink-300 focus:outline-none focus:border-ink-400 focus:ring-2 focus:ring-ink-100"
+                className="w-full px-3 py-2.5 bg-white dark:bg-ink-700 border border-ink-200 dark:border-ink-500 rounded-card text-sm text-ink-700 dark:text-ink-100 placeholder-ink-300 dark:placeholder-ink-500 focus:outline-none focus:border-ink-400 dark:focus:border-ink-300 focus:ring-2 focus:ring-ink-100 dark:focus:ring-ink-700"
               />
             </div>
 
@@ -116,7 +119,7 @@ export function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-3 py-2.5 bg-white border border-ink-200 rounded-card text-sm text-ink-700 placeholder-ink-300 focus:outline-none focus:border-ink-400 focus:ring-2 focus:ring-ink-100"
+                className="w-full px-3 py-2.5 bg-white dark:bg-ink-700 border border-ink-200 dark:border-ink-500 rounded-card text-sm text-ink-700 dark:text-ink-100 placeholder-ink-300 dark:placeholder-ink-500 focus:outline-none focus:border-ink-400 dark:focus:border-ink-300 focus:ring-2 focus:ring-ink-100 dark:focus:ring-ink-700"
               />
             </div>
 
@@ -127,11 +130,11 @@ export function LoginPage() {
             </div>
           </form>
 
-          <div className="mt-6 p-4 bg-attention-bg/60 border border-attention/20 rounded-card text-xs text-attention">
+          <div className="mt-6 p-4 bg-attention-bg/60 dark:bg-attention-DEFAULT/20 border border-attention/20 dark:border-attention-DEFAULT/30 rounded-card text-xs text-attention dark:text-attention-ring">
             <div className="font-display font-semibold uppercase tracking-industrial mb-1">
               Modo demostración
             </div>
-            <div className="leading-relaxed text-ink-500">
+            <div className="leading-relaxed text-ink-500 dark:text-ink-300">
               Esta build mockea la autenticación con AWS Cognito. Cualquier
               correo y contraseña te llevará al selector de rol.
             </div>

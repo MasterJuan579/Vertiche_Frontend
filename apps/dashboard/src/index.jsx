@@ -11,8 +11,6 @@ import { Skeleton } from './components/common';
 import { useDashboardData, useModal } from './hooks';
 import useDashboardStore from './stores/dashboardStore';
 import { STAGE_BY_KEY } from './utils/constants';
-import './styles/global.css';
-
 const ACCENT = '#0F766E';
 
 const NAV = [

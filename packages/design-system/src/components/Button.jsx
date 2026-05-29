@@ -11,11 +11,11 @@ export function Button({
     'inline-flex items-center justify-center gap-2 font-display font-semibold rounded-card transition-colors disabled:opacity-50 disabled:cursor-not-allowed';
 
   const variants = {
-    primary: 'bg-ink-700 text-white hover:bg-ink-900',
-    secondary: 'bg-white text-ink-700 border border-ink-200 hover:bg-ink-50',
-    ghost: 'bg-transparent text-ink-500 hover:text-ink-700 hover:bg-ink-50',
-    danger: 'bg-anomaly text-white hover:bg-red-900',
-    flow: 'bg-flow text-white hover:bg-green-800',
+    primary: 'bg-ink-700 text-white hover:bg-ink-900 dark:bg-ink-600 dark:hover:bg-ink-500',
+    secondary: 'bg-white dark:bg-ink-700 text-ink-700 dark:text-ink-100 border border-ink-200 dark:border-ink-500 hover:bg-ink-50 dark:hover:bg-ink-600',
+    ghost: 'bg-transparent text-ink-500 dark:text-ink-300 hover:text-ink-700 dark:hover:text-ink-100 hover:bg-ink-50 dark:hover:bg-ink-600',
+    danger: 'bg-anomaly text-white hover:bg-red-900 dark:hover:bg-red-800',
+    flow: 'bg-flow text-white hover:bg-green-800 dark:hover:bg-green-700',
   };
 
   const sizes = {
