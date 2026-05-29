@@ -2,3 +2,5 @@
 // directly at "/" and "/nueva-contrasena" — no need for internal routing here.
 export { LoginPage } from './pages/LoginPage.jsx';
 export { NewPasswordPage } from './pages/NewPasswordPage.jsx';
+export { ForgotPasswordPage } from './pages/ForgotPasswordPage.jsx';
+export { ConfirmForgotPasswordPage } from './pages/ConfirmForgotPasswordPage.jsx';

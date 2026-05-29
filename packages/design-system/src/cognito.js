@@ -164,6 +164,68 @@ export async function respondToNewPasswordChallenge(email, newPassword, session)
 }
 
 /**
+ * Initiate password recovery. Cognito emails a 6-digit confirmation code.
+ * Returns { status: 'success' } | { status: 'error', code, message }.
+ *
+ * Note: Cognito does NOT reveal whether the user exists — an unknown email
+ * still returns success (anti-enumeration). Callers must show the same UI
+ * regardless and proceed to the confirmation step.
+ */
+export async function forgotPassword(email) {
+  if (!CLIENT_ID) {
+    return {
+      status: 'error',
+      code: 'MissingConfig',
+      message: 'VITE_COGNITO_CLIENT_ID is not set.',
+    };
+  }
+  try {
+    const { ok, body } = await postToCognito('ForgotPassword', {
+      ClientId: CLIENT_ID,
+      Username: email,
+    });
+    return ok ? { status: 'success' } : toError(body);
+  } catch {
+    return {
+      status: 'error',
+      code: 'NetworkError',
+      message: 'Could not reach the authentication service.',
+    };
+  }
+}
+
+/**
+ * Verify the emailed code and set the new password.
+ * Returns { status: 'success' } | { status: 'error', code, message }.
+ * Common error codes: CodeMismatchException, ExpiredCodeException,
+ * InvalidPasswordException, LimitExceededException.
+ */
+export async function confirmForgotPassword(email, code, newPassword) {
+  if (!CLIENT_ID) {
+    return {
+      status: 'error',
+      code: 'MissingConfig',
+      message: 'VITE_COGNITO_CLIENT_ID is not set.',
+    };
+  }
+  try {
+    const { ok, body } = await postToCognito('ConfirmForgotPassword', {
+      ClientId: CLIENT_ID,
+      Username: email,
+      ConfirmationCode: code,
+      Password: newPassword,
+    });
+    return ok ? { status: 'success' } : toError(body);
+  } catch {
+    return {
+      status: 'error',
+      code: 'NetworkError',
+      message: 'Could not reach the authentication service.',
+    };
+  }
+}
+
+/**
  * Revoke all of a user's tokens server-side. Best-effort: callers should clear
  * the local session regardless of the outcome, so this never throws.
  */

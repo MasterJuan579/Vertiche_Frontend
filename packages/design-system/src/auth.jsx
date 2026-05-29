@@ -29,6 +29,8 @@ import { Navigate } from 'react-router-dom';
 import {
   initiateAuth,
   respondToNewPasswordChallenge,
+  forgotPassword as cognitoForgotPassword,
+  confirmForgotPassword as cognitoConfirmForgotPassword,
   globalSignOut,
 } from './cognito.js';
 
@@ -207,6 +209,20 @@ export function AuthProvider({ children }) {
     [establishSession]
   );
 
+  // Password recovery. These are thin pass-throughs to Cognito: neither
+  // installs a session — after a successful reset the user logs in explicitly
+  // (locked decision), so we deliberately do NOT call establishSession here.
+  const forgotPassword = useCallback(
+    (email) => cognitoForgotPassword(email),
+    []
+  );
+
+  const confirmForgotPassword = useCallback(
+    (email, code, newPassword) =>
+      cognitoConfirmForgotPassword(email, code, newPassword),
+    []
+  );
+
   const signOut = useCallback(async () => {
     // Best-effort server-side revocation; clear locally regardless of outcome.
     if (session && session.accessToken) {
@@ -223,8 +239,24 @@ export function AuthProvider({ children }) {
   // useMemo prevents the context value from changing on every render, which
   // would force every consumer to re-render.
   const value = useMemo(
-    () => ({ session, ready, signIn, completeNewPassword, signOut }),
-    [session, ready, signIn, completeNewPassword, signOut]
+    () => ({
+      session,
+      ready,
+      signIn,
+      completeNewPassword,
+      forgotPassword,
+      confirmForgotPassword,
+      signOut,
+    }),
+    [
+      session,
+      ready,
+      signIn,
+      completeNewPassword,
+      forgotPassword,
+      confirmForgotPassword,
+      signOut,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
