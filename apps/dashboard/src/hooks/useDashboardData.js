@@ -2,6 +2,12 @@ import { useCallback, useEffect } from 'react';
 import useDashboardStore from '../stores/dashboardStore';
 import { api, ENDPOINTS } from '../services/api';
 
+function getErrorMessage(err) {
+  if (!err) return 'Error desconocido';
+  if (typeof err === 'string') return err;
+  return err.detail || err.message || (err.status ? `HTTP ${err.status}` : 'Error desconocido');
+}
+
 export function useDashboardData(refreshInterval = 30000) {
   const setData = useDashboardStore((state) => state.setData);
   const setError = useDashboardStore((state) => state.setError);
@@ -44,7 +50,7 @@ export function useDashboardData(refreshInterval = 30000) {
         proveedores,
       });
     } catch (err) {
-      setError(err.message);
+      setError(getErrorMessage(err));
     }
   }, [setData, setError, setLoading]);
 
@@ -56,4 +62,3 @@ export function useDashboardData(refreshInterval = 30000) {
 
   return { refresh: loadAllData };
 }
-

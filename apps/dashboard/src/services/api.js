@@ -1,4 +1,4 @@
-const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+import { apiGet } from '@vertiche/design-system';
 
 function normalizeList(payload) {
   if (Array.isArray(payload)) return payload;
@@ -9,17 +9,17 @@ function normalizeList(payload) {
   return [];
 }
 
+async function getList(endpoint) {
+  try {
+    return normalizeList(await apiGet(endpoint));
+  } catch (err) {
+    if (err?.status === 404) return [];
+    throw err;
+  }
+}
+
 export const api = {
-  async get(endpoint) {
-    const res = await fetch(`${BASE_URL}${endpoint}`, {
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    if (res.status === 404) return [];
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-    return normalizeList(await res.json());
-  },
+  get: getList,
 };
 
 export const ENDPOINTS = {
