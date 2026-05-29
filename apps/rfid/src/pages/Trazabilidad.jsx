@@ -5,11 +5,24 @@ import {
   ETAPA_COLORS,
   getColorCSS,
   esColorClaro,
-} from '../data/demoOCs.js';
+} from '../data/etapas.js';
 import { formatHora, epcCorto } from '../utils/format.js';
 import { realApi } from '../services/realApi.js';
+import { onSocket } from '../services/socketClient.js';
 
 const ETAPAS_ORDEN = ['PREREGISTRO', 'QA', 'REGISTRO', 'SORTER', 'BAHIA', 'AUDITORIA', 'ENVIO'];
+
+/**
+ * Mapeo de la etapa del EventoLectura del backend (RECEPCION, QA, SORTING, PACKING, SALIDA)
+ * al label del Gantt visual (PREREGISTRO, QA, REGISTRO, SORTER, BAHIA, AUDITORIA, ENVIO).
+ */
+const ETAPA_BACKEND_TO_GANTT = {
+  RECEPCION: 'PREREGISTRO',
+  QA:        'QA',
+  SORTING:   'SORTER',
+  PACKING:   'BAHIA',
+  SALIDA:    'ENVIO',
+};
 
 export function Trazabilidad() {
   const { epc: urlEpc } = useParams();
@@ -30,6 +43,18 @@ export function Trazabilidad() {
     }
   }, [urlEpc]);
 
+  // Tiempo real: si estamos viendo un EPC y llega una lectura/cambio de ese
+  // mismo EPC, recargamos el detalle.
+  useEffect(() => {
+    if (!resultado?.tag?.epc) return;
+    const activo = resultado.tag.epc;
+    const onEv = (ev) => { if (ev?.epc === activo) buscarEpc(activo); };
+    const offLectura = onSocket('lectura', onEv);
+    const offTag = onSocket('tag', onEv);
+    const offAnomalia = onSocket('anomalia', onEv);
+    return () => { offLectura(); offTag(); offAnomalia(); };
+  }, [resultado?.tag?.epc]);
+
   async function buscarEpc(epc) {
     setError(null);
     setResultado(null);
@@ -44,23 +69,9 @@ export function Trazabilidad() {
         return;
       }
 
-      // Obtener tienda asociada
-      let tienda = null;
-      if (tag.tienda_id) {
-        const tiendas = await realApi.getTiendas();
-        tienda = tiendas.find(t => t.tienda_id === tag.tienda_id);
-      }
-
-      const tagConTienda = { ...tag, tienda };
-
-      // Buscar OC asociada
-      const ocs = await realApi.getOrdenesCompra();
-      const ocOwner = ocs.find(oc => oc.ordenId === tag.orden_id);
-
-      // Construir timeline básico
-      const timeline = buildTimelineFromTag(tagConTienda);
-
-      setResultado({ tag: tagConTienda, timeline, ocOwner });
+      const timeline = buildTimelineFromTag(tag);
+      const ocOwner = tag.orden_id ? { ordenId: tag.orden_id } : null;
+      setResultado({ tag, timeline, ocOwner });
     } catch (err) {
       setError(`Error al buscar: ${err.message}`);
     } finally {
@@ -75,13 +86,12 @@ export function Trazabilidad() {
     setCargando(true);
 
     try {
-      const tags = await realApi.getTags();
-      const normalizedSku = sku.trim().toLowerCase();
-      const matches = tags.filter(t => 
-        (t.sku || '').toLowerCase().includes(normalizedSku)
-      ).map(t => ({ ...t, ordenId: t.orden_id }));
-
-      setResultadoLista(matches);
+      const tags = await realApi.buscarTagsPorSku(sku);
+      const lista = (tags || []).map((t) => ({ ...t, ordenId: t.orden_id }));
+      setResultadoLista(lista);
+      if (lista.length === 0) {
+        setError(`Sin coincidencias para SKU "${sku}".`);
+      }
     } catch (err) {
       setError(`Error al buscar: ${err.message}`);
     } finally {
@@ -89,29 +99,59 @@ export function Trazabilidad() {
     }
   }
 
+  /**
+   * Construye el timeline real de un tag a partir de sus lecturas y anomalías.
+   * Reglas:
+   *   - PRE-REGISTRO siempre aparece (timestamp = tag.registrado_en).
+   *   - Cada lectura se ubica en su etapa visual (mapa ETAPA_BACKEND_TO_GANTT).
+   *   - Si una lectura tiene anomalía pendiente con el mismo lector_id y
+   *     timestamp dentro de ±3 segundos, se marca como anómala (rojo + tipo).
+   */
   function buildTimelineFromTag(tag) {
-    const events = [];
-    const etapas = ['RECEPCION', 'QA', 'SORTING', 'PACKING', 'SALIDA'];
-    const mapeoEtapa = {
-      'RECEPCION': 'PREREGISTRO',
-      'QA': 'QA',
-      'SORTING': 'SORTER',
-      'PACKING': 'BAHIA',
-      'SALIDA': 'ENVIO'
+    const lecturas = tag.ultimas_lecturas || [];
+    const anomalias = tag.anomalias_pendientes || [];
+
+    // Helper: encuentra anomalía asociada a una lectura
+    const anomaliaParaLectura = (l) => {
+      const ts = new Date(l.timestamp).getTime();
+      return anomalias.find((a) => {
+        if (a.lector_id !== l.lector_id) return false;
+        const dt = Math.abs(new Date(a.timestamp).getTime() - ts);
+        return dt <= 3000;
+      });
     };
 
-    etapas.forEach(etapa => {
-      const etapaDisplay = mapeoEtapa[etapa] || etapa;
-      events.push({
-        tipo: 'LECTURA',
-        etapa: etapaDisplay,
-        detalle: etapaDisplay,
-        tiempo: tag.registrado_en || new Date().toISOString(),
-        lector: 'SISTEMA',
-      });
+    const entries = [];
+
+    // Siempre: PRE-REGISTRO desde tag.registrado_en
+    entries.push({
+      tipo: 'REGISTRO',
+      etapa: 'PREREGISTRO',
+      detalle: 'Tag dado de alta',
+      tiempo: tag.registrado_en || tag.createdAt,
+      lector: 'SISTEMA',
+      bahia: tag.tienda?.bahia_asignada || null,
+      sistema: true,
     });
 
-    return events;
+    // Por cada lectura física, busca su anomalía y construye entry
+    for (const l of lecturas) {
+      const anom = anomaliaParaLectura(l);
+      entries.push({
+        tipo: 'LECTURA',
+        etapa: ETAPA_BACKEND_TO_GANTT[l.etapa] || l.etapa,
+        detalle: ETAPA_BACKEND_TO_GANTT[l.etapa] || l.etapa,
+        tiempo: l.timestamp,
+        lector: l.lector_id,
+        bahia: l.bahia,
+        rssi: l.rssi,
+        es_duplicado: l.es_duplicado,
+        anomaliaTipo: anom?.tipo_error || null,
+        anomaliaDesc: anom?.descripcion || null,
+      });
+    }
+
+    return entries.sort((a, b) => new Date(a.tiempo) - new Date(b.tiempo));
   }
 
   function buscar(epcOverride, skuOverride) {
@@ -137,7 +177,6 @@ export function Trazabilidad() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4 items-start">
 
-      {/* LEFT COLUMN */}
       <div className="space-y-4">
         <Panel title="Buscar Prepack">
           <div className="p-4 space-y-2.5">
@@ -181,16 +220,8 @@ export function Trazabilidad() {
             </button>
           </div>
         </Panel>
-
-        <Panel title="Ejemplos rápidos">
-          <div className="p-3 space-y-2">
-            <QuickLink label="Buscar por EPC" onClick={() => { setTipoBusqueda('epc'); setBusqueda('RFID001'); buscar('RFID001'); }} />
-            <QuickLink label="Buscar por SKU" onClick={() => { setTipoBusqueda('sku'); setBusqueda('PLAYERA'); buscar(null, 'PLAYERA'); }} variant="anomaly" />
-          </div>
-        </Panel>
       </div>
 
-      {/* RIGHT COLUMN */}
       <div className="space-y-4">
         {!resultado && !resultadoLista && !error && !cargando && (
           <Panel>
@@ -242,7 +273,7 @@ function Panel({ title, error = false, children }) {
   return (
     <div className={`rounded-card border shadow-card overflow-hidden ${
       error
-        ? 'bg-anomaly-bg border-anomaly-ring/40'
+        ? 'bg-anomaly-bg border-anomaly-ring/40 dark:bg-anomaly/15 dark:border-anomaly-ring/40'
         : 'bg-white border-ink-100 dark:bg-ink-700 dark:border-ink-600'
     }`}>
       {title && (
@@ -255,23 +286,12 @@ function Panel({ title, error = false, children }) {
   );
 }
 
-function QuickLink({ label, onClick, variant }) {
-  const variantCls = variant === 'anomaly'
-    ? 'border-anomaly-ring/40 text-anomaly hover:bg-anomaly-bg'
-    : 'border-rfid/30 text-rfid hover:bg-rfid/10';
-  return (
-    <button onClick={onClick} className={`w-full px-3 py-2 rounded-card text-[13px] font-medium text-left transition-colors bg-white border ${variantCls} dark:bg-ink-700`}>
-      {label}
-    </button>
-  );
-}
-
 function SkuMatchRow({ tag, onVer }) {
   return (
     <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-ink-100 dark:border-ink-600">
       <div>
         <div className="font-mono text-[13px] text-ink-700 dark:text-ink-100 mb-1">{tag.epc}</div>
-        <div className="text-[12px] text-ink-500">SKU: {tag.sku} · {tag.cantidad_piezas} pzas</div>
+        <div className="text-[12px] text-ink-500 dark:text-ink-300">SKU: {tag.sku} · {tag.cantidad_piezas} pzas</div>
       </div>
       <button onClick={() => onVer(tag.epc)} className="shrink-0 px-3 py-1.5 rounded-card text-[12px] font-semibold bg-rfid text-white hover:bg-blue-700">
         Ver historial
@@ -317,26 +337,74 @@ function InfoField({ label, value, mono = false, span = 1, valueStyle }) {
 
 function TimelineCard({ tag, timeline }) {
   const etapas = ETAPAS_ORDEN.map((etapa) => {
-    const ev = timeline?.find(e => e.etapa === etapa);
-    return { nombre: etapa, completada: !!ev, timestamp: ev?.tiempo };
+    // Todas las entries de esta etapa (puede haber varias lecturas QA, varias BAHIA, etc.)
+    const enEtapa = (timeline || []).filter((e) => e.etapa === etapa);
+    // Prioridad de display: anomalía > duplicado > ok. Si hay alguna anómala, esa gana.
+    const ev =
+      enEtapa.find((e) => e.anomaliaTipo) ||
+      enEtapa.find((e) => e.es_duplicado) ||
+      enEtapa[0];
+    return {
+      nombre: etapa,
+      completada: !!ev,
+      timestamp: ev?.tiempo,
+      lector: ev?.lector,
+      bahia: ev?.bahia,
+      anomaliaTipo: ev?.anomaliaTipo || null,
+      anomaliaDesc: ev?.anomaliaDesc || null,
+      es_duplicado: ev?.es_duplicado || false,
+      sistema: ev?.sistema || false,
+      total: enEtapa.length,
+    };
   });
 
   return (
     <Panel title="Recorrido del prepack">
       <div className="p-6 overflow-x-auto">
         <div className="flex items-start min-w-max gap-4">
-          {etapas.map((etapa) => (
-            <div key={etapa.nombre} className="flex flex-col items-center gap-2 min-w-[80px]">
-              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[9px] font-bold ${etapa.completada ? 'bg-flow text-white' : 'bg-ink-100 text-ink-400'}`}>
-                {etapa.completada ? '✓' : '○'}
+          {etapas.map((etapa) => {
+            const conAnom = !!etapa.anomaliaTipo;
+            const conDup = etapa.es_duplicado && !conAnom;
+            // Color del círculo:
+            //   anomalía → rojo  | duplicado → ámbar  | ok → verde  | vacío → gris
+            const cls = conAnom
+              ? 'bg-anomaly text-white'
+              : conDup
+                ? 'bg-attention text-white'
+                : etapa.completada
+                  ? 'bg-flow text-white'
+                  : 'bg-ink-100 text-ink-400 dark:bg-ink-600 dark:text-ink-300';
+            const icono = conAnom ? '!' : conDup ? '≡' : etapa.completada ? '✓' : '○';
+            return (
+              <div key={etapa.nombre} className="flex flex-col items-center gap-2 min-w-[90px]" title={etapa.anomaliaDesc || ''}>
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-[12px] font-bold ${cls}`}>
+                  {icono}
+                </div>
+                <div className="text-center">
+                  <div className="text-[10px] font-semibold uppercase dark:text-ink-100">{ETAPA_LABELS[etapa.nombre]}</div>
+                  {etapa.timestamp && <div className="font-mono text-[9px] text-ink-400">{formatHora(etapa.timestamp)}</div>}
+                  {etapa.lector && <div className="font-mono text-[8px] text-ink-400 mt-0.5">{etapa.lector}</div>}
+                  {conAnom && (
+                    <div className="font-mono text-[8px] font-bold uppercase text-anomaly dark:text-anomaly-ring mt-1">
+                      ⚠ {etapa.anomaliaTipo}
+                    </div>
+                  )}
+                  {conDup && (
+                    <div className="font-mono text-[8px] font-bold uppercase text-attention dark:text-attention-ring mt-1">
+                      DUPLICADA
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="text-center">
-                <div className="text-[10px] font-semibold uppercase">{ETAPA_LABELS[etapa.nombre]}</div>
-                {etapa.timestamp && <div className="font-mono text-[9px] text-ink-400">{formatHora(etapa.timestamp)}</div>}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+
+        {(!timeline || timeline.length === 0) && (
+          <div className="mt-4 text-center text-[12px] text-ink-400">
+            Sin lecturas registradas para este prepack.
+          </div>
+        )}
       </div>
     </Panel>
   );

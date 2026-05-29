@@ -1,200 +1,138 @@
 // rfid/src/services/realApi.js
+// Cliente HTTP centralizado. Propaga errores con mensaje real del backend.
 
-// Usa la variable de entorno del monorepo, con fallback para pruebas locales
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+
+/**
+ * Lee el token guardado por @vertiche/design-system (auth.jsx) en sessionStorage.
+ * Cuando Cognito esté activo en backend, este header ya viaja automáticamente.
+ */
+function authHeader() {
+  try {
+    const raw = sessionStorage.getItem('vertiche.auth');
+    if (!raw) return {};
+    const { token } = JSON.parse(raw);
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Helper único de fetch.
+ * - Pone Content-Type y Authorization.
+ * - Si la respuesta no es 2xx, intenta leer JSON del backend y lanza Error con su `message` o `error`.
+ * - 404 en GET por id devuelve null en vez de lanzar (para distinguir "no encontrado" de "error de red").
+ */
+async function request(path, opts = {}) {
+  const { method = 'GET', body, allowNotFound = false, ...rest } = opts;
+  const headers = {
+    'Accept': 'application/json',
+    ...(body ? { 'Content-Type': 'application/json' } : {}),
+    ...authHeader(),
+    ...(opts.headers || {}),
+  };
+
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+      ...rest,
+    });
+  } catch (networkErr) {
+    throw new Error(`Sin conexión con el backend (${API_BASE}). ${networkErr.message}`);
+  }
+
+  if (res.status === 404 && allowNotFound) return null;
+
+  const text = await res.text();
+  const data = text ? safeParseJson(text) : null;
+
+  if (!res.ok) {
+    const message =
+      (data && (data.message || data.error)) ||
+      `HTTP ${res.status} ${res.statusText}`;
+    const err = new Error(message);
+    err.status = res.status;
+    err.code = data?.error;
+    err.detalle = data?.detalle;
+    throw err;
+  }
+
+  return data;
+}
+
+function safeParseJson(text) {
+  try { return JSON.parse(text); } catch { return text; }
+}
 
 export const realApi = {
   // ============================================
   // ÓRDENES DE COMPRA
   // ============================================
-  
-  async getOrdenesCompra() {
-    try {
-      const res = await fetch(`${API_BASE}/OrdenCompra/listarOrdenes`);
-      if (!res.ok) throw new Error('Error al obtener órdenes');
-      const data = await res.json();
-      
-      // Transformar al formato que espera el frontend (demoOCs.js)
-      return data.map(oc => ({
-        ordenId: oc.orden_id,
-        nombre: oc.nombre_producto || `OC ${oc.orden_id}`,
-        proveedor: oc.Proveedor?.nombre || 'Proveedor',
-        totalPrepacks: oc.total_esperados || 0,
-        total_recibidos: oc.total_recibidos || 0,
-        faltantes: (oc.total_esperados || 0) - (oc.total_recibidos || 0),
-        estado: oc.estado || 'ACTIVO',
-        pct: oc.total_esperados > 0 ? ((oc.total_recibidos || 0) / oc.total_esperados) * 100 : 0,
-        hasErr: false,
-        tags: [],
-        tagsPorEtapa: {},
-        etapasActivas: [],
-        idxMin: 0,
-        idxMax: 6,
-        etapa_logs: []
-      }));
-    } catch (error) {
-      console.error('Error en getOrdenesCompra:', error);
-      return [];
-    }
+  getOrdenesCompra() {
+    return request('/OrdenCompra/listarOrdenes');
   },
 
   // ============================================
-  // LECTURAS RFID
+  // LECTURAS RFID (EventoLectura)
   // ============================================
-  
-  async getLecturas() {
-    try {
-      const res = await fetch(`${API_BASE}/EventoLectura/listarLecturas`);
-      if (!res.ok) throw new Error('Error al obtener lecturas');
-      const lecturas = await res.json();
-      
-      return lecturas.map(l => ({
-        id: l.id,
-        epc: l.epc,
-        etapa: l.etapa,
-        lector: l.lector_id,
-        tiempo: l.timestamp,
-        es_duplicado: l.es_duplicado || false,
-        detalle: l.etapa
-      }));
-    } catch (error) {
-      console.error('Error en getLecturas:', error);
-      return [];
-    }
+  getLecturas() {
+    return request('/EventoLectura/listarLecturas');
   },
 
   // ============================================
   // ANOMALÍAS
   // ============================================
-  
-  async getAnomalias() {
-    try {
-      const res = await fetch(`${API_BASE}/Anomalia/listarAnomalias`);
-      if (!res.ok) throw new Error('Error al obtener anomalías');
-      const anomalias = await res.json();
-      
-      return anomalias
-        .filter(a => !a.resuelto)
-        .map(a => ({
-          id: a.id,
-          tipo: a.tipo_error,
-          epc: a.epc,
-          etapa: a.etapa,
-          bahia: a.bahia,
-          bahia_esperada: a.bahia_esperada,
-          tiempo: a.timestamp,
-          descripcion: a.descripcion
-        }));
-    } catch (error) {
-      console.error('Error en getAnomalias:', error);
-      return [];
-    }
+  getAnomalias({ soloAbiertas = true } = {}) {
+    const qs = soloAbiertas ? '?resuelto=false' : '';
+    return request(`/Anomalia/listarAnomalias${qs}`);
+  },
+
+  resolverAnomalia(id) {
+    return request(`/Anomalia/${id}/resolver`, { method: 'PATCH' });
   },
 
   // ============================================
   // TAGS (PREPACKS)
   // ============================================
-  
-  async getTags() {
-    try {
-      const res = await fetch(`${API_BASE}/Tag/listarTags`);
-      if (!res.ok) throw new Error('Error al obtener tags');
-      return await res.json();
-    } catch (error) {
-      console.error('Error en getTags:', error);
-      return [];
-    }
+  getTags() {
+    return request('/Tag/listarTags');
   },
 
-  async crearTag(tagData) {
-    try {
-      const res = await fetch(`${API_BASE}/Tag/crearTag`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(tagData)
-      });
-      return await res.json();
-    } catch (error) {
-      console.error('Error en crearTag:', error);
-      return { error: error.message };
-    }
+  getTagsRecientes(limit = 10) {
+    return request(`/Tag/listarTags?limit=${limit}&order=registrado_en:desc`);
   },
 
-  async getTagByEpc(epc) {
-    try {
-      const res = await fetch(`${API_BASE}/Tag/${epc}`);
-      if (!res.ok) return null;
-      return await res.json();
-    } catch (error) {
-      console.error('Error en getTagByEpc:', error);
-      return null;
-    }
+  crearTag(tagData) {
+    return request('/Tag/crearTag', { method: 'POST', body: tagData });
+  },
+
+  getTagByEpc(epc) {
+    return request(`/Tag/${encodeURIComponent(epc)}`, { allowNotFound: true });
+  },
+
+  buscarTagsPorSku(sku) {
+    return request(`/Tag/buscarSku/${encodeURIComponent(sku)}`);
   },
 
   // ============================================
   // TIENDAS Y PROVEEDORES
   // ============================================
-  
-  async getTiendas() {
-    try {
-      const res = await fetch(`${API_BASE}/Tienda/listarTiendas`);
-      if (!res.ok) throw new Error('Error al obtener tiendas');
-      return await res.json();
-    } catch (error) {
-      console.error('Error en getTiendas:', error);
-      return [];
-    }
+  getTiendas() {
+    return request('/Tienda/listarTiendas');
   },
 
-  async getProveedores() {
-    try {
-      const res = await fetch(`${API_BASE}/Proveedor/listarProveedores`);
-      if (!res.ok) throw new Error('Error al obtener proveedores');
-      return await res.json();
-    } catch (error) {
-      console.error('Error en getProveedores:', error);
-      return [];
-    }
+  getProveedores() {
+    return request('/Proveedor/listarProveedores');
   },
 
   // ============================================
-  // ESTADÍSTICAS (si tienes RfidController)
+  // PALETS (para asociar tags a OC en Vinculación)
   // ============================================
-  
-  async getEstadisticas() {
-    try {
-      const res = await fetch(`${API_BASE}/rfid/estadisticas`);
-      if (!res.ok) throw new Error('Error al obtener estadísticas');
-      return await res.json();
-    } catch (error) {
-      console.error('Error en getEstadisticas (opcional):', error);
-      // Retorna valores por defecto si el endpoint no existe
-      return {
-        lecturas_hoy: 0,
-        palets_completados_hoy: 0,
-        anomalias_pendientes: 0,
-        total_tags: 0,
-        tags_por_etapa: []
-      };
-    }
+  getPalets() {
+    return request('/Palet/listarPalets');
   },
-
-  // ============================================
-  // PROCESAR LECTURA EN TIEMPO REAL (si tienes RfidController)
-  // ============================================
-  
-  async procesarLectura(lecturaData) {
-    try {
-      const res = await fetch(`${API_BASE}/rfid/lectura`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(lecturaData)
-      });
-      return await res.json();
-    } catch (error) {
-      console.error('Error en procesarLectura:', error);
-      return { success: false, error: error.message };
-    }
-  }
-  
 };

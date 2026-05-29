@@ -3,8 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { EventoRow } from '../components/EventoRow.jsx';
 import { AnomaliaAlert } from '../components/AnomaliaAlert.jsx';
 import { realApi } from '../services/realApi.js';
-import { cargarLecturasReales, LECTURAS_INICIALES, ANOMALIAS_INICIALES, getContadores } from '../data/demoLecturas.js';
+import { onSocket } from '../services/socketClient.js';
 
+/**
+ * Bitácora de lecturas — vista operativa en vivo.
+ * Lado izquierdo: stream de EventoLectura (filtra por etapa).
+ * Lado derecho: contadores del turno + lista de anomalías abiertas.
+ *
+ * Polling cada 8s. La resolución de anomalía pega al backend
+ * (PATCH /Anomalia/:id/resolver) y luego se quita de la lista local.
+ */
 export function Bitacora() {
   const navigate = useNavigate();
   const [filtroEtapa, setFiltroEtapa] = useState('TODAS');
@@ -16,25 +24,88 @@ export function Bitacora() {
 
   useEffect(() => {
     cargarDatos();
-    const interval = setInterval(cargarDatos, 8000);
+    // Polling de respaldo cada 30s — sólo para resincronizar si se cae el socket.
+    const interval = setInterval(cargarDatos, 30000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Tiempo real: el backend emite 'lectura' y 'anomalia' cuando el ESP32
+  // manda una lectura procesada. Las prepend al estado local sin recargar.
+  useEffect(() => {
+    const offLectura = onSocket('lectura', (ev) => {
+      const nuevoEvento = {
+        id: ev.id,
+        epc: ev.epc,
+        etapa: ev.etapa,
+        lector: ev.lector_id,
+        bahia: ev.bahia,
+        rssi: ev.rssi,
+        tiempo: ev.timestamp,
+        es_duplicado: ev.es_duplicado || false,
+        detalle: ev.etapa,
+      };
+      setEventos((prev) => [nuevoEvento, ...prev]);
+      setEtapasDisponibles((prev) =>
+        ev.etapa && !prev.includes(ev.etapa) ? [...prev, ev.etapa] : prev
+      );
+    });
+
+    const offAnomalia = onSocket('anomalia', (a) => {
+      const nuevaAnom = {
+        id: a.id,
+        tipo: a.tipo_error,
+        epc: a.epc,
+        etapa: a.etapa,
+        bahia: a.bahia,
+        tiempo: a.timestamp,
+        descripcion: a.descripcion,
+      };
+      setAnomalias((prev) => [nuevaAnom, ...prev]);
+    });
+
+    return () => {
+      offLectura();
+      offAnomalia();
+    };
   }, []);
 
   async function cargarDatos() {
     try {
       setError(null);
-      await cargarLecturasReales();
-      
-      // Actualizar estados con los datos cargados
-      setEventos([...LECTURAS_INICIALES]);
-      setAnomalias([...ANOMALIAS_INICIALES]);
-      
-      // Extraer etapas únicas
-      const etapas = [...new Set(LECTURAS_INICIALES.map(l => l.etapa).filter(Boolean))];
+      const [lecturasRaw, anomaliasRaw] = await Promise.all([
+        realApi.getLecturas(),
+        realApi.getAnomalias({ soloAbiertas: true }),
+      ]);
+
+      const eventosNormalizados = (lecturasRaw || []).map((l) => ({
+        id: l.id,
+        epc: l.epc,
+        etapa: l.etapa,
+        lector: l.lector_id,
+        bahia: l.bahia,
+        rssi: l.rssi,
+        tiempo: l.timestamp,
+        es_duplicado: l.es_duplicado || false,
+        detalle: l.etapa,
+      }));
+
+      const anomaliasNormalizadas = (anomaliasRaw || []).map((a) => ({
+        id: a.id,
+        tipo: a.tipo_error,
+        epc: a.epc,
+        etapa: a.etapa,
+        bahia: a.bahia,
+        tiempo: a.timestamp,
+        descripcion: a.descripcion,
+      }));
+
+      setEventos(eventosNormalizados);
+      setAnomalias(anomaliasNormalizadas);
+
+      const etapas = [...new Set(eventosNormalizados.map((l) => l.etapa).filter(Boolean))];
       setEtapasDisponibles(etapas);
     } catch (err) {
-      console.error('Error cargando bitácora:', err);
-      setError('No se pudieron cargar los datos. ¿El backend está corriendo?');
+      setError(err.message);
     } finally {
       setCargando(false);
     }
@@ -44,7 +115,12 @@ export function Bitacora() {
     ? eventos
     : eventos.filter((e) => e.etapa === filtroEtapa);
 
-  const contadores = getContadores();
+  const contadores = {
+    preregistro: eventos.filter((e) => e.etapa === 'RECEPCION').length,
+    bahia: eventos.filter((e) => e.etapa === 'PACKING' || e.etapa === 'SORTING').length,
+    anomalias: anomalias.length,
+    duplicados: eventos.filter((e) => e.es_duplicado).length,
+  };
 
   const statCards = [
     { label: 'Lecturas Pre-Reg', valor: contadores.preregistro, accent: 'text-rfid dark:text-blue-300' },
@@ -60,37 +136,38 @@ export function Bitacora() {
   };
 
   const dismissAnomaly = async (id) => {
+    const prev = anomalias;
+    setAnomalias(prev.filter((a) => a.id !== id));
     try {
-      await realApi.resolverAnomalia?.(id);
-      setAnomalias(prev => prev.filter(a => a.id !== id));
-    } catch (error) {
-      console.error('Error:', error);
+      await realApi.resolverAnomalia(id);
+    } catch (err) {
+      console.error('No se pudo resolver la anomalía:', err.message);
+      setAnomalias(prev);
+      setError(`No se pudo resolver la anomalía: ${err.message}`);
     }
   };
 
   const FILTROS = ['TODAS', ...etapasDisponibles];
 
-  // Estado de carga
   if (cargando) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <div className="text-2xl mb-2">📡</div>
           <div className="text-ink-400">Cargando bitácora...</div>
-          <div className="text-xs text-ink-300 mt-2">Conectando con {import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'}</div>
+          <div className="text-xs text-ink-300 mt-2">Conectando con {import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}</div>
         </div>
       </div>
     );
   }
 
-  // Error
   if (error) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <div className="text-2xl mb-2">⚠️</div>
-          <div className="text-anomaly">{error}</div>
-          <button 
+          <div className="text-anomaly dark:text-anomaly-ring">{error}</div>
+          <button
             onClick={() => { setCargando(true); cargarDatos(); }}
             className="mt-4 px-4 py-2 bg-rfid text-white rounded-card text-sm"
           >
@@ -104,14 +181,13 @@ export function Bitacora() {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 items-start">
 
-      {/* EVENT STREAM */}
       <Panel>
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-ink-100 dark:border-ink-600">
           <div className="flex items-center gap-2">
             <span className="font-mono text-[11px] font-bold uppercase tracking-industrial text-ink-400">
               Bitácora de lecturas
             </span>
-            <span className="text-[9px] font-bold uppercase tracking-industrial px-1.5 py-0.5 rounded bg-attention-bg text-attention border border-attention-ring/40">
+            <span className="text-[9px] font-bold uppercase tracking-industrial px-1.5 py-0.5 rounded bg-attention-bg text-attention border border-attention-ring/40 dark:bg-attention/20 dark:text-attention-ring dark:border-attention-ring/40">
               En Vivo
             </span>
           </div>
@@ -123,7 +199,6 @@ export function Bitacora() {
           </div>
         </div>
 
-        {/* Stage filter chips */}
         <div className="flex gap-1.5 px-4 py-2.5 border-b border-ink-100 dark:border-ink-600 flex-wrap">
           {FILTROS.map((e) => (
             <button
@@ -136,7 +211,7 @@ export function Bitacora() {
                   : 'bg-white text-ink-500 border border-ink-100 hover:bg-ink-50 dark:bg-ink-700 dark:text-ink-300 dark:border-ink-500 dark:hover:bg-ink-600'
               }`}
             >
-              {e === 'TODAS' ? 'TODAS' : (e === 'PREREGISTRO' ? 'PRE-REG' : e)}
+              {e === 'TODAS' ? 'TODAS' : (e === 'RECEPCION' ? 'PRE-REG' : e)}
             </button>
           ))}
           <span className="ml-auto self-center text-[11px] text-ink-400">
@@ -144,7 +219,6 @@ export function Bitacora() {
           </span>
         </div>
 
-        {/* Table header */}
         <div className="grid grid-cols-[80px_1fr_120px_110px_60px] gap-2 items-center px-3 py-2 border-b border-ink-100 dark:border-ink-600 bg-ink-50 dark:bg-ink-800 font-mono text-[10px] font-bold uppercase tracking-industrial text-ink-400">
           <span>Hora</span>
           <span>EPC</span>
@@ -153,7 +227,6 @@ export function Bitacora() {
           <span>OK</span>
         </div>
 
-        {/* Stream */}
         {eventosFiltrados.length === 0 ? (
           <div className="px-6 py-8 text-center text-[13px] text-ink-400">
             Sin lecturas para la etapa <strong>{filtroEtapa}</strong>.
@@ -173,18 +246,13 @@ export function Bitacora() {
         )}
       </Panel>
 
-      {/* RIGHT SIDEBAR */}
       <div className="space-y-4">
         <Panel title="Contadores del turno">
           <div className="grid grid-cols-2 gap-px bg-ink-100 dark:bg-ink-600">
             {statCards.map((s) => (
               <div key={s.label} className="px-4 py-3 bg-white dark:bg-ink-700">
-                <div className={`text-[24px] font-bold leading-none ${s.accent}`}>
-                  {s.valor}
-                </div>
-                <div className="text-[10px] uppercase tracking-industrial text-ink-400 mt-1">
-                  {s.label}
-                </div>
+                <div className={`text-[24px] font-bold leading-none ${s.accent}`}>{s.valor}</div>
+                <div className="text-[10px] uppercase tracking-industrial text-ink-400 mt-1">{s.label}</div>
               </div>
             ))}
           </div>

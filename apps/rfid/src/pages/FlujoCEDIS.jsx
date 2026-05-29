@@ -1,38 +1,35 @@
-import { useState, useEffect } from 'react';
-import {
-  DEMO_OCS,
-  DEMO_KPI,
-  ETAPAS_FLUJO,
-  ETAPA_COLORS,
-  cargarDatosReales,
-} from '../data/demoOCs.js';
+import { useState, useEffect, useRef } from 'react';
+import { ETAPAS_FLUJO, ETAPA_COLORS } from '../data/etapas.js';
 import { ModalOC } from '../components/ModalOC.jsx';
 import { ModalResumenOC } from '../components/ModalResumenOC.jsx';
+import { realApi } from '../services/realApi.js';
+import { onSocket } from '../services/socketClient.js';
 
 /**
- * Supervisor's home view. Three sections vertically:
+ * Supervisor's home view. Tres secciones verticales:
+ *   1. BarraKPI    — KPIs derivados de las órdenes y tags reales.
+ *   2. Gantt       — fila por OC, 7 columnas (etapas).
+ *   3. Bay grid    — 10 bahías × 3 zonas, con la cantidad de OCs por bahía/zona.
  *
- *   1. BarraKPI    — top strip with "mejora vs manual" semaphore + 3 stats +
- *                    pause toggle. The pause is decorative without real data.
- *   2. Gantt       — sticky-left OC name column + 7 stage cells per OC row.
- *                    Click name → ModalResumenOC. Click stage cell → ModalOC.
- *   3. Bay grid    — 10 bays × 3 zones (Bahías / Auditoría / Envío). Click
- *                    any cell with OCs → expandable panel with the OC list.
- *
- * Con el backend conectado, useEffect carga datos reales cada 10 segundos.
- * Sin backend, usa datos mock de DEMO_OCS / DEMO_KPI.
+ * Carga datos reales desde el backend cada 10s.
  */
 
-const ZONA_LABELS = {
-  BAHIA:     'Bahías',
-  AUDITORIA: 'Auditoría',
-  ENVIO:     'Envío',
-};
+const ZONA_LABELS = { BAHIA: 'Bahías', AUDITORIA: 'Auditoría', ENVIO: 'Envío' };
+const ZONA_ACCENT = { BAHIA: '#0891B2', AUDITORIA: '#DB2777', ENVIO: '#16A34A' };
 
-const ZONA_ACCENT = {
-  BAHIA:     '#0891B2',
-  AUDITORIA: '#DB2777',
-  ENVIO:     '#16A34A',
+/**
+ * Mapeo del enum DB `Tag.etapa_actual` a la etapa visual del Gantt.
+ * El esquema MySQL guarda EstadoPrepack: REGISTRADO, EN_QA, APROBADO, RECHAZADO, EN_CAJA, ENVIADO.
+ * El Gantt visual usa: PREREGISTRO, QA, REGISTRO, SORTER, BAHIA, AUDITORIA, ENVIO.
+ * Ajustar este mapa cuando se modelen SORTER/AUDITORIA explícitamente en el backend.
+ */
+const ETAPA_DB_TO_GANTT = {
+  REGISTRADO: 'PREREGISTRO',
+  EN_QA:      'QA',
+  APROBADO:   'REGISTRO',
+  RECHAZADO:  'QA',
+  EN_CAJA:    'BAHIA',
+  ENVIADO:    'ENVIO',
 };
 
 export function FlujoCEDIS() {
@@ -42,79 +39,85 @@ export function FlujoCEDIS() {
   const [ocResumenOpen, setOcResumenOpen] = useState(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState(null);
-  const [ocsData, setOcsData] = useState([]);
-  const [kpiData, setKpiData] = useState(DEMO_KPI);
+  const [ocsView, setOcsView] = useState([]);
+  const [kpiView, setKpiView] = useState(emptyKpi());
 
-  // Cargar datos al inicio
+  const pausadoRef = useRef(pausado);
+  useEffect(() => { pausadoRef.current = pausado; }, [pausado]);
+
   useEffect(() => {
     cargarDatos();
+    // Polling de respaldo cada 30s — el grueso de los updates llega por socket.
     const interval = setInterval(() => {
-      if (!pausado) cargarDatos();
-    }, 10000);
+      if (!pausadoRef.current) cargarDatos();
+    }, 30000);
     return () => clearInterval(interval);
-  }, [pausado]);
+  }, []);
+
+  // Tiempo real: recarga el Gantt cuando llega cualquier 'lectura' o 'tag'.
+  // El cálculo de tagsPorEtapa depende del set completo, así que es más simple
+  // recargar que mutar local.
+  useEffect(() => {
+    const refrescar = () => { if (!pausadoRef.current) cargarDatos(); };
+    const offLectura = onSocket('lectura', refrescar);
+    const offTag = onSocket('tag', refrescar);
+    const offAnomalia = onSocket('anomalia', refrescar);
+    return () => {
+      offLectura();
+      offTag();
+      offAnomalia();
+    };
+  }, []);
 
   async function cargarDatos() {
     try {
       setError(null);
-      await cargarDatosReales();
-      setOcsData([...DEMO_OCS]);
-      setKpiData({ ...DEMO_KPI });
-      console.log('✅ Datos cargados:', DEMO_OCS.length, 'órdenes');
+      const [ordenes, tags, anomalias] = await Promise.all([
+        realApi.getOrdenesCompra(),
+        realApi.getTags(),
+        realApi.getAnomalias({ soloAbiertas: true }),
+      ]);
+      const { ocs, kpi } = buildOcsView(ordenes || [], tags || [], anomalias || []);
+      setOcsView(ocs);
+      setKpiView(kpi);
     } catch (err) {
-      console.error('Error cargando flujo:', err);
-      setError('No se pudieron cargar los datos. Verifica que el backend esté corriendo en el puerto 3000');
+      setError(err.message);
     } finally {
       setCargando(false);
     }
   }
 
-  console.log('🔍 DEMO_OCS antes del filtro:', DEMO_OCS);
-  console.log('🔍 Longitud:', DEMO_OCS.length);
-
-  const ocs = DEMO_OCS.filter((oc) => oc.ordenId);
-
-  console.log('🔍 OCs después del filtro:', ocs);
-
-
   function ocsEnBahiaYEtapa(numBahia, etapa) {
     const bahiaId = `BAHIA-${numBahia}`;
-    return ocs.filter((oc) =>
+    return ocsView.filter((oc) =>
       (oc.tagsPorEtapa?.[etapa] || []).some(
         (t) => t.tienda?.bahia_asignada === bahiaId
       )
     );
   }
 
-  const openModalDetalle = (oc, etapaOrigen) => {
-    setOcModalOpen({ oc, etapaOrigen });
-  };
+  const openModalDetalle = (oc, etapaOrigen) => setOcModalOpen({ oc, etapaOrigen });
+  const openModalResumen = (oc) => setOcResumenOpen(oc);
 
-  const openModalResumen = (oc) => {
-    setOcResumenOpen(oc);
-  };
-
-  // Estado de carga
   if (cargando) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <div className="text-2xl mb-2">📦</div>
           <div className="text-ink-400">Cargando flujo del CEDIS...</div>
-          <div className="text-xs text-ink-300 mt-2">Conectando con http://localhost:3000</div>
+          <div className="text-xs text-ink-300 mt-2">Conectando con {import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}</div>
         </div>
       </div>
     );
   }
 
-  // Error
   if (error) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
           <div className="text-2xl mb-2">⚠️</div>
-          <div className="text-anomaly">{error}</div>
-          <button 
+          <div className="text-anomaly dark:text-anomaly-ring">{error}</div>
+          <button
             onClick={() => { setCargando(true); cargarDatos(); }}
             className="mt-4 px-4 py-2 bg-rfid text-white rounded-card text-sm"
           >
@@ -127,15 +130,12 @@ export function FlujoCEDIS() {
 
   return (
     <div className="space-y-4">
-
-      {/* ════════════ KPI BAR ════════════ */}
       <BarraKPI
-        kpi={kpiData}
+        kpi={kpiView}
         pausado={pausado}
         onTogglePausa={() => setPausado((p) => !p)}
       />
 
-      {/* ════════════ GANTT ════════════ */}
       <Panel>
         <div className="flex items-center justify-between px-4 py-3 border-b border-ink-100 dark:border-ink-600 flex-wrap gap-2">
           <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-ink-400 flex items-center gap-2">
@@ -145,7 +145,7 @@ export function FlujoCEDIS() {
                 ⏸ Pausado
               </span>
             )}
-            <span className="font-normal text-ink-400">— {ocs.length} OCs activas</span>
+            <span className="font-normal text-ink-400">— {ocsView.length} OCs activas</span>
           </div>
           <button
             onClick={cargarDatos}
@@ -156,7 +156,7 @@ export function FlujoCEDIS() {
         </div>
 
         <div className="px-5 py-4">
-          {ocs.length === 0 ? (
+          {ocsView.length === 0 ? (
             <div className="px-6 py-10 text-center text-[13px] text-ink-400">
               <div className="text-2xl mb-2">📭</div>
               Sin órdenes de compra activas.
@@ -169,23 +169,22 @@ export function FlujoCEDIS() {
             </div>
           ) : (
             <Gantt
-              ocs={ocs}
+              ocs={ocsView}
               onClickSegmento={openModalDetalle}
               onClickNombre={openModalResumen}
             />
           )}
 
-          {/* ════════════ BAY GRID ════════════ */}
-          {ocs.length > 0 && (
+          {ocsView.length > 0 && (
             <div className="border-t border-ink-100 dark:border-ink-600 pt-4 mt-6">
               <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-ink-400 mb-3">
                 Estado por bahía
               </div>
 
               {[
-                { zona: 'BAHIA',     label: ZONA_LABELS.BAHIA,     color: ZONA_ACCENT.BAHIA },
+                { zona: 'BAHIA', label: ZONA_LABELS.BAHIA, color: ZONA_ACCENT.BAHIA },
                 { zona: 'AUDITORIA', label: ZONA_LABELS.AUDITORIA, color: ZONA_ACCENT.AUDITORIA },
-                { zona: 'ENVIO',     label: ZONA_LABELS.ENVIO,     color: ZONA_ACCENT.ENVIO },
+                { zona: 'ENVIO', label: ZONA_LABELS.ENVIO, color: ZONA_ACCENT.ENVIO },
               ].map((fila) => (
                 <BayRow
                   key={fila.zona}
@@ -221,7 +220,6 @@ export function FlujoCEDIS() {
         </div>
       </Panel>
 
-      {/* ════════════ MODALS ════════════ */}
       {ocModalOpen && (
         <ModalOC
           oc={ocModalOpen.oc}
@@ -240,6 +238,97 @@ export function FlujoCEDIS() {
 }
 
 // ════════════════════════════════════════════════════════════════════
+// Vista derivada — funciones puras
+// ════════════════════════════════════════════════════════════════════
+
+function emptyKpi() {
+  return {
+    mejora_porcentaje: null,
+    objetivo_mejora_pct: 32,
+    tiempo_promedio_hoy_min: null,
+    palets_activos: 0,
+    palets_completados_hoy: 0,
+  };
+}
+
+/**
+ * Toma OCs, tags y anomalías crudos del backend y construye:
+ *   - ocs[]: cada OC con tagsPorEtapa, idxMin/idxMax, hasErr, pct…
+ *   - kpi: agregados básicos
+ *
+ * Se vincula Tag → OC vía tag.orden_id (lo expone TagController.serializarTag
+ * leyéndolo del Palet asociado). Si el Tag no tiene palet aún, queda fuera del
+ * Gantt — es esperado, todavía no entró al flujo.
+ */
+function buildOcsView(ordenes, tags, anomalias) {
+  const anomaliasPorEpc = new Map();
+  for (const a of anomalias) {
+    if (a.epc) {
+      anomaliasPorEpc.set(a.epc, (anomaliasPorEpc.get(a.epc) || 0) + 1);
+    }
+  }
+
+  const ocs = ordenes.map((oc) => {
+    const tagsDeOC = tags.filter((t) => t.orden_id === oc.orden_id);
+    const tagsPorEtapa = agruparTagsPorEtapaGantt(tagsDeOC);
+    const etapasConTags = ETAPAS_FLUJO.map((e, i) => ({ id: e.id, idx: i }))
+      .filter(({ id }) => (tagsPorEtapa[id]?.length ?? 0) > 0);
+    const idxMin = etapasConTags.length ? etapasConTags[0].idx : 0;
+    const idxMax = etapasConTags.length ? etapasConTags[etapasConTags.length - 1].idx : 0;
+
+    const total_esperados = oc.total_esperados || 0;
+    const total_recibidos = oc.total_recibidos || 0;
+    const pct = total_esperados > 0 ? (total_recibidos / total_esperados) * 100 : 0;
+
+    const hasErr =
+      tagsDeOC.some((t) => t.qa_fallido) ||
+      tagsDeOC.some((t) => anomaliasPorEpc.has(t.epc));
+
+    return {
+      orden_id: oc.orden_id,
+      ordenId: oc.orden_id,
+      nombre: oc.nombre_producto || `OC ${oc.orden_id}`,
+      proveedor: oc.Proveedor?.nombre || oc.proveedor?.nombre || 'Proveedor',
+      totalPrepacks: total_esperados,
+      total_esperados,
+      total_recibidos,
+      faltantes: Math.max(0, total_esperados - total_recibidos),
+      estado: oc.estado,
+      pct,
+      hasErr,
+      tags: tagsDeOC,
+      tagsPorEtapa,
+      etapasActivas: etapasConTags.map((e) => e.id),
+      idxMin,
+      idxMax,
+      etapa_logs: [],
+      Proveedor: oc.Proveedor,
+    };
+  });
+
+  const kpi = {
+    mejora_porcentaje: null,
+    objetivo_mejora_pct: 32,
+    tiempo_promedio_hoy_min: null,
+    palets_activos: ocs.filter((o) => o.estado !== 'CANCELADA' && o.estado !== 'RECIBIDA').length,
+    palets_completados_hoy: ocs.filter((o) => o.estado === 'RECIBIDA').length,
+  };
+
+  return { ocs, kpi };
+}
+
+function agruparTagsPorEtapaGantt(tags) {
+  const grupos = Object.fromEntries(ETAPAS_FLUJO.map((e) => [e.id, []]));
+  for (const tag of tags) {
+    const etapaGantt = ETAPA_DB_TO_GANTT[tag.etapa_actual];
+    if (etapaGantt && grupos[etapaGantt]) {
+      grupos[etapaGantt].push(tag);
+    }
+  }
+  return grupos;
+}
+
+// ════════════════════════════════════════════════════════════════════
 // KPI BAR
 // ════════════════════════════════════════════════════════════════════
 
@@ -248,14 +337,9 @@ function BarraKPI({ kpi, pausado, onTogglePausa }) {
   const meta = kpi?.objetivo_mejora_pct || 32;
   const metaOk = mejora !== null && mejora >= meta;
 
-  // Semaphore color
   const sem = mejora === null
     ? 'gris'
-    : metaOk
-      ? 'verde'
-      : mejora >= 20
-        ? 'amarillo'
-        : 'rojo';
+    : metaOk ? 'verde' : mejora >= 20 ? 'amarillo' : 'rojo';
 
   const semClass = {
     verde:    'bg-flow-bg border-flow-ring/40 text-flow dark:bg-flow/20 dark:border-flow-ring/40 dark:text-flow-ring',
@@ -281,11 +365,7 @@ function BarraKPI({ kpi, pausado, onTogglePausa }) {
       'bg-white border border-ink-100 ' +
       'dark:bg-ink-700 dark:border-ink-600'
     }>
-      {/* Main semaphore card */}
-      <div className={
-        'flex items-center gap-3 mr-5 px-4 py-2 rounded-card border-[1.5px] shrink-0 ' +
-        semClass
-      }>
+      <div className={'flex items-center gap-3 mr-5 px-4 py-2 rounded-card border-[1.5px] shrink-0 ' + semClass}>
         <span className={'w-3.5 h-3.5 rounded-full shrink-0 ' + dotClass} />
         <div>
           <div className="font-mono text-[9px] font-bold uppercase tracking-industrial mb-0.5">
@@ -302,16 +382,13 @@ function BarraKPI({ kpi, pausado, onTogglePausa }) {
 
       <div className="w-px h-8 bg-ink-100 dark:bg-ink-600 mr-5 shrink-0" />
 
-      {/* Secondary stats */}
       {[
-        { label: 'Ciclo promedio', value: cicloLabel,                         accent: 'text-ink-700 dark:text-ink-100' },
-        { label: 'OCs activas',    value: kpi?.palets_activos ?? '—',         accent: 'text-ink-700 dark:text-ink-100' },
+        { label: 'Ciclo promedio', value: cicloLabel,                        accent: 'text-ink-700 dark:text-ink-100' },
+        { label: 'OCs activas',    value: kpi?.palets_activos ?? '—',        accent: 'text-ink-700 dark:text-ink-100' },
         { label: 'Completadas hoy', value: kpi?.palets_completados_hoy ?? '—', accent: 'text-flow dark:text-flow-ring' },
       ].map((s) => (
         <div key={s.label} className="mr-6 shrink-0">
-          <div className={'text-[20px] font-extrabold leading-none ' + s.accent}>
-            {s.value}
-          </div>
+          <div className={'text-[20px] font-extrabold leading-none ' + s.accent}>{s.value}</div>
           <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-ink-400 mt-0.5">
             {s.label}
           </div>
@@ -319,10 +396,8 @@ function BarraKPI({ kpi, pausado, onTogglePausa }) {
       ))}
 
       <div className="flex-1" />
-
       <div className="w-px h-8 bg-ink-100 dark:bg-ink-600 mr-3 shrink-0" />
 
-      {/* Pause toggle */}
       <button
         type="button"
         onClick={onTogglePausa}
@@ -350,11 +425,7 @@ function Gantt({ ocs, onClickSegmento, onClickNombre }) {
   return (
     <div className="overflow-x-auto mb-3">
       <div className="min-w-[800px]">
-        {/* Header row */}
-        <div
-          className="grid mb-1"
-          style={{ gridTemplateColumns: GANTT_COLS }}
-        >
+        <div className="grid mb-1" style={{ gridTemplateColumns: GANTT_COLS }}>
           <div className="pl-3 pb-1.5 border-b-2 border-ink-100 dark:border-ink-600">
             <span className="font-mono text-[9px] font-bold uppercase tracking-industrial text-ink-400">
               Orden de compra
@@ -376,7 +447,6 @@ function Gantt({ ocs, onClickSegmento, onClickNombre }) {
           ))}
         </div>
 
-        {/* OC rows */}
         {ocs.map((oc) => (
           <BarraOC
             key={oc.ordenId}
@@ -397,7 +467,6 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
       className="grid w-full items-center border-b border-ink-100 dark:border-ink-600"
       style={{ gridTemplateColumns: columnWidths, minHeight: 44 }}
     >
-      {/* Sticky-left OC name */}
       <div
         onClick={(e) => { e.stopPropagation(); onClickNombre(oc); }}
         className={
@@ -416,7 +485,6 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
         </div>
       </div>
 
-      {/* Stage cells */}
       {ETAPAS_FLUJO.map((etapa, idx) => {
         const tagsEnEtapa = oc.tagsPorEtapa[etapa.id] || [];
         const tienePrep = tagsEnEtapa.length > 0;
@@ -444,12 +512,10 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
 }
 
 function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, tagsEnEtapaCount, totalPrepacks, onClick }) {
-  // Empty placeholder
   if (!tienePrep && !enRango) {
     return <div className="h-9 m-[3px_2px]" />;
   }
 
-  // In-range but empty (dashed line)
   if (!tienePrep && enRango) {
     return (
       <div className="h-9 m-[3px_2px] rounded-md flex items-center justify-center bg-ink-50/50 border border-dashed border-ink-100 dark:bg-ink-800/30 dark:border-ink-600">
@@ -458,8 +524,7 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, tagsEnEtapaCo
     );
   }
 
-  // Active stage
-  const pctWidth = Math.min(100, Math.round((tagsEnEtapaCount / totalPrepacks) * 100));
+  const pctWidth = totalPrepacks > 0 ? Math.min(100, Math.round((tagsEnEtapaCount / totalPrepacks) * 100)) : 0;
   const bg = errEnEtapa ? 'rgba(239, 68, 68, 0.12)' : `${color}1f`;
   const border = errEnEtapa ? '#FCA5A5' : `${color}66`;
 
@@ -467,10 +532,7 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, tagsEnEtapaCo
     <div
       onClick={onClick}
       className="h-9 m-[3px_2px] rounded-md relative overflow-hidden cursor-pointer transition-all flex items-center justify-center"
-      style={{
-        background: bg,
-        border: `1.5px solid ${border}`,
-      }}
+      style={{ background: bg, border: `1.5px solid ${border}` }}
       onMouseEnter={(e) => {
         if (!errEnEtapa) {
           e.currentTarget.style.background = `${color}3a`;
@@ -482,30 +544,19 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, tagsEnEtapaCo
         e.currentTarget.style.borderColor = border;
       }}
     >
-      {/* Progress overlay */}
       <div
         className="absolute left-0 top-0 bottom-0 rounded-l-md pointer-events-none"
-        style={{
-          width: `${pctWidth}%`,
-          background: `${color}10`,
-        }}
+        style={{ width: `${pctWidth}%`, background: `${color}10` }}
       />
 
-      {/* Stats row */}
       <div className="flex items-center w-full justify-around px-1.5 z-[1] relative">
         {datos.map((d, i) => (
           <div key={i} className="text-center flex-1">
-            <div
-              className="text-[13px] font-extrabold leading-none"
-              style={{ color: errEnEtapa ? '#DC2626' : color }}
-            >
+            <div className="text-[13px] font-extrabold leading-none" style={{ color: errEnEtapa ? '#DC2626' : color }}>
               {d.v}
             </div>
             {d.l && (
-              <div
-                className="text-[7px] font-bold uppercase tracking-industrial mt-0.5 opacity-80 leading-tight"
-                style={{ color: errEnEtapa ? '#991B1B' : color }}
-              >
+              <div className="text-[7px] font-bold uppercase tracking-industrial mt-0.5 opacity-80 leading-tight" style={{ color: errEnEtapa ? '#991B1B' : color }}>
                 {d.l}
               </div>
             )}
@@ -513,7 +564,6 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, tagsEnEtapaCo
         ))}
       </div>
 
-      {/* Anomaly dot */}
       {errEnEtapa && (
         <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-anomaly border-2 border-white animate-[pulse-rojo_1.4s_ease-in-out_infinite]" />
       )}
@@ -521,9 +571,8 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, tagsEnEtapaCo
   );
 }
 
-/** Per-stage 3-value display data. */
 function getDatosEtapa(etapaId, tagsEnEtapa, oc) {
-  const total = oc.totalPrepacks;
+  const total = oc.totalPrepacks || tagsEnEtapa.length;
   const n = tagsEnEtapa.length;
   const pct = total > 0 ? Math.round((n / total) * 100) : 0;
   const err = tagsEnEtapa.filter((t) => t.qa_fallido).length;
@@ -550,10 +599,7 @@ function BayRow({ fila, ocsEnBahiaYEtapa, activeKey, onClickCell }) {
   return (
     <div className="flex items-center gap-0 mb-2">
       <div className="w-20 shrink-0 flex items-center justify-end pr-3">
-        <span
-          className="font-mono text-[9px] font-bold uppercase tracking-industrial"
-          style={{ color: fila.color }}
-        >
+        <span className="font-mono text-[9px] font-bold uppercase tracking-industrial" style={{ color: fila.color }}>
           {fila.label}
         </span>
       </div>
@@ -584,7 +630,7 @@ function BayRow({ fila, ocsEnBahiaYEtapa, activeKey, onClickCell }) {
   );
 }
 
-function BayCell({ bahia, n, hasErr, activa, ocs, shape, zonaColor, onClick }) {
+function BayCell({ bahia, n, hasErr, activa, ocs, shape, onClick }) {
   const vacia = n === 0;
   const sem = vacia ? 'gris' : hasErr ? 'rojo' : 'verde';
 
@@ -600,19 +646,15 @@ function BayCell({ bahia, n, hasErr, activa, ocs, shape, zonaColor, onClick }) {
 
   const bgCls = activa
     ? 'bg-rfid/15 dark:bg-rfid/20'
-    : vacia
-      ? 'bg-ink-50 dark:bg-ink-800'
-      : hasErr
-        ? 'bg-anomaly-bg dark:bg-anomaly/15'
-        : 'bg-white dark:bg-ink-700';
+    : vacia ? 'bg-ink-50 dark:bg-ink-800'
+    : hasErr ? 'bg-anomaly-bg dark:bg-anomaly/15'
+    : 'bg-white dark:bg-ink-700';
 
   const borderCls = activa
     ? 'border-rfid border-[2.5px]'
-    : vacia
-      ? 'border-ink-100 border-2 dark:border-ink-600'
-      : hasErr
-        ? 'border-anomaly-ring/40 border-2 dark:border-anomaly-ring/40'
-        : 'border-ink-100 border-2 dark:border-ink-600';
+    : vacia ? 'border-ink-100 border-2 dark:border-ink-600'
+    : hasErr ? 'border-anomaly-ring/40 border-2 dark:border-anomaly-ring/40'
+    : 'border-ink-100 border-2 dark:border-ink-600';
 
   return (
     <button
@@ -622,19 +664,14 @@ function BayCell({ bahia, n, hasErr, activa, ocs, shape, zonaColor, onClick }) {
       className={
         baseCls + ' ' + widthCls + ' ' + heightCls + ' ' + bgCls + ' ' + borderCls + ' ' +
         'flex flex-col items-center justify-center px-1 py-2 shrink-0 transition-all ' +
-        (vacia
-          ? 'cursor-default'
-          : 'cursor-pointer hover:shadow-card-hover')
+        (vacia ? 'cursor-default' : 'cursor-pointer hover:shadow-card-hover')
       }
     >
       <div className="font-mono text-[7px] font-bold uppercase tracking-industrial text-ink-400 mb-1">
         B-{bahia}
       </div>
       <div className="w-full text-center">
-        <div className={
-          'text-lg font-extrabold leading-none ' +
-          (vacia ? 'text-ink-400' : 'text-ink-700 dark:text-ink-100')
-        }>
+        <div className={'text-lg font-extrabold leading-none ' + (vacia ? 'text-ink-400' : 'text-ink-700 dark:text-ink-100')}>
           {n}
         </div>
         <div className="text-[7px] text-ink-400 mb-1">OCs</div>
@@ -649,21 +686,15 @@ function BayCell({ bahia, n, hasErr, activa, ocs, shape, zonaColor, onClick }) {
           </div>
         )}
       </div>
-      {/* Status dot at top right */}
       {!vacia && (
-        <span
-          className={
-            'absolute w-2 h-2 rounded-full ' + dotCls
-          }
-          style={{ top: 6, right: 8 }}
-        />
+        <span className={'absolute w-2 h-2 rounded-full ' + dotCls} style={{ top: 6, right: 8 }} />
       )}
     </button>
   );
 }
 
 // ════════════════════════════════════════════════════════════════════
-// EXPANDABLE PANEL — appears below the bay grid when a cell is clicked
+// EXPANDABLE PANEL
 // ════════════════════════════════════════════════════════════════════
 
 function PanelBahia({ titulo, ocs, onClose, onAbrirOC }) {
@@ -676,9 +707,7 @@ function PanelBahia({ titulo, ocs, onClose, onAbrirOC }) {
         'animate-[entrada-panel_.2s_ease]'
       }>
         <div className="flex items-center justify-between">
-          <div className="text-[13px] text-ink-400">
-            Sin órdenes en {titulo}.
-          </div>
+          <div className="text-[13px] text-ink-400">Sin órdenes en {titulo}.</div>
           <CloseButton onClose={onClose} />
         </div>
       </div>
@@ -694,9 +723,7 @@ function PanelBahia({ titulo, ocs, onClose, onAbrirOC }) {
     }>
       <div className="flex justify-between items-center mb-3">
         <div>
-          <div className="text-[14px] font-bold text-ink-700 dark:text-ink-100">
-            {titulo}
-          </div>
+          <div className="text-[14px] font-bold text-ink-700 dark:text-ink-100">{titulo}</div>
           <div className="text-[11px] text-ink-400 mt-0.5">
             {ocs.length} orden{ocs.length !== 1 ? 'es' : ''} de compra
           </div>
@@ -716,16 +743,10 @@ function PanelBahia({ titulo, ocs, onClose, onAbrirOC }) {
                 : 'bg-ink-50 border-ink-100 border-l-4 border-l-rfid hover:bg-rfid/5 dark:bg-ink-800 dark:border-ink-600 dark:border-l-rfid dark:hover:bg-rfid/10')
             }
           >
-            <div className="text-[12px] font-semibold text-ink-700 dark:text-ink-100 mb-0.5">
-              {oc.nombre}
-            </div>
-            <div className="font-mono text-[9px] text-ink-400 mb-1.5">
-              {oc.ordenId} · {oc.totalPrepacks} prepacks
-            </div>
+            <div className="text-[12px] font-semibold text-ink-700 dark:text-ink-100 mb-0.5">{oc.nombre}</div>
+            <div className="font-mono text-[9px] text-ink-400 mb-1.5">{oc.ordenId} · {oc.totalPrepacks} prepacks</div>
             <ProgressBar pct={oc.pct} hasErr={oc.hasErr} />
-            <div className="text-[9px] text-ink-400 mt-1">
-              {Math.round(oc.pct)}% procesado
-            </div>
+            <div className="text-[9px] text-ink-400 mt-1">{Math.round(oc.pct)}% procesado</div>
           </div>
         ))}
       </div>
@@ -755,21 +776,12 @@ function ProgressBar({ pct, hasErr }) {
   return (
     <div className="h-1 bg-ink-100 dark:bg-ink-600 rounded overflow-hidden">
       <div
-        className={
-          'h-full transition-[width] duration-500 ' +
-          (hasErr
-            ? 'bg-anomaly dark:bg-anomaly-ring'
-            : 'bg-rfid')
-        }
+        className={'h-full transition-[width] duration-500 ' + (hasErr ? 'bg-anomaly dark:bg-anomaly-ring' : 'bg-rfid')}
         style={{ width: `${clampedPct}%` }}
       />
     </div>
   );
 }
-
-// ════════════════════════════════════════════════════════════════════
-// PANEL WRAPPER
-// ════════════════════════════════════════════════════════════════════
 
 function Panel({ children }) {
   return (
