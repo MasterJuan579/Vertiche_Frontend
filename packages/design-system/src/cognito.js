@@ -226,6 +226,52 @@ export async function confirmForgotPassword(email, code, newPassword) {
 }
 
 /**
+ * Send a verification code to the signed-in user's email attribute. Requires a
+ * valid AccessToken (from initiateAuth). Cognito emails a 6-digit code. Uses the
+ * AccessToken (not ClientId), so no CLIENT_ID guard is needed.
+ * Returns { status: 'success' } | { status: 'error', code, message }.
+ */
+export async function sendEmailVerificationCode(accessToken) {
+  try {
+    const { ok, body } = await postToCognito('GetUserAttributeVerificationCode', {
+      AccessToken: accessToken,
+      AttributeName: 'email',
+    });
+    return ok ? { status: 'success' } : toError(body);
+  } catch {
+    return {
+      status: 'error',
+      code: 'NetworkError',
+      message: 'Could not reach the authentication service.',
+    };
+  }
+}
+
+/**
+ * Verify the email attribute with the emailed code. Requires the AccessToken.
+ * On success Cognito sets email_verified=true.
+ * Returns { status: 'success' } | { status: 'error', code, message }.
+ * Common error codes: CodeMismatchException, ExpiredCodeException,
+ * LimitExceededException.
+ */
+export async function verifyEmailAttribute(accessToken, code) {
+  try {
+    const { ok, body } = await postToCognito('VerifyUserAttribute', {
+      AccessToken: accessToken,
+      AttributeName: 'email',
+      Code: code,
+    });
+    return ok ? { status: 'success' } : toError(body);
+  } catch {
+    return {
+      status: 'error',
+      code: 'NetworkError',
+      message: 'Could not reach the authentication service.',
+    };
+  }
+}
+
+/**
  * Revoke all of a user's tokens server-side. Best-effort: callers should clear
  * the local session regardless of the outcome, so this never throws.
  */

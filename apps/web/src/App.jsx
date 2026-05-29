@@ -7,6 +7,7 @@ import {
   NewPasswordPage,
   ForgotPasswordPage,
   ConfirmForgotPasswordPage,
+  VerifyEmailPage,
 } from 'auth';
 
 // Per-role modules
@@ -27,6 +28,7 @@ export default function App() {
         path="/recuperar-contrasena/confirmar"
         element={<ConfirmForgotPasswordPage />}
       />
+      <Route path="/verificar-email" element={<VerifyEmailPage />} />
 
       {/* Role-gated modules. The "/*" wildcard lets each module own its
           internal routing. RequireRole redirects to login if no session,
