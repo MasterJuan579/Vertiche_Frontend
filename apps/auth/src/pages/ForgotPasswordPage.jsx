@@ -1,18 +1,18 @@
-import { useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Button, ThemeToggle, useAuth, ROLE_HOMES } from '@vertiche/design-system';
+import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Button, ThemeToggle, useAuth } from '@vertiche/design-system';
 
-// Maps a signIn() failure code to a user-facing Spanish message.
+// Maps a forgotPassword() failure code to a user-facing Spanish message.
 function errorMessage(code) {
   switch (code) {
-    case 'NotAuthorizedException':
-      return 'Email o contraseña incorrectos.';
-    case 'not_registered':
-      return 'Tu cuenta no está registrada en el sistema. Contacta a un administrador.';
-    case 'UserNotConfirmedException':
-      return 'Tu cuenta no está verificada. Contacta a un administrador.';
+    case 'LimitExceededException':
+      return 'Demasiados intentos. Intenta más tarde.';
+    case 'InvalidParameterException':
+      return 'Correo electrónico inválido.';
+    case 'MissingConfig':
+      return 'Error de configuración. Contacta a un administrador.';
     default:
-      return 'No se pudo iniciar sesión. Intenta de nuevo.';
+      return 'No se pudo enviar el código. Intenta de nuevo.';
   }
 }
 
@@ -41,53 +41,24 @@ function Spinner() {
   );
 }
 
-export function LoginPage() {
+export function ForgotPasswordPage() {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { session, signIn } = useAuth();
+  const { forgotPassword } = useAuth();
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  // Post-recovery success toast — set by ConfirmForgotPasswordPage on reset.
-  const [showRecoveryToast, setShowRecoveryToast] = useState(
-    !!location.state?.recoverySuccess
-  );
-  useEffect(() => {
-    if (!showRecoveryToast) return;
-    const t = setTimeout(() => setShowRecoveryToast(false), 5000);
-    return () => clearTimeout(t);
-  }, [showRecoveryToast]);
-
-  // Once a session exists (fresh login or already-authenticated visit to "/"),
-  // bounce to the role's module home. Doing this in an effect — rather than
-  // reading session right after await signIn() — avoids a stale-closure read,
-  // since the context state hasn't re-rendered yet at that point.
-  useEffect(() => {
-    if (session) {
-      navigate(ROLE_HOMES[session.user.role] || '/', { replace: true });
-    }
-  }, [session, navigate]);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    const result = await signIn(email, password);
+    const result = await forgotPassword(email);
 
     if (result.status === 'success') {
-      // Keep the spinner up; the effect above navigates once session lands.
-      return;
-    }
-    if (
-      result.status === 'challenge' &&
-      result.challengeName === 'NEW_PASSWORD_REQUIRED'
-    ) {
-      navigate('/nueva-contrasena', {
-        state: { email: result.email, session: result.session },
-      });
+      // Cognito always succeeds for known/unknown emails (anti-enumeration).
+      // Move to Step 2 regardless; the code only arrives for real accounts.
+      navigate('/recuperar-contrasena/confirmar', { state: { email } });
       return;
     }
 
@@ -95,13 +66,8 @@ export function LoginPage() {
     setError(errorMessage(result.code));
   }
 
-  // Clear the error as soon as the user edits either field.
   function handleEmailChange(e) {
     setEmail(e.target.value);
-    if (error) setError('');
-  }
-  function handlePasswordChange(e) {
-    setPassword(e.target.value);
     if (error) setError('');
   }
 
@@ -171,20 +137,14 @@ export function LoginPage() {
           </div>
 
           <div className="label-industrial text-ink-400 dark:text-ink-300 mb-2">
-            Inicio de sesión
+            Recuperación de cuenta
           </div>
           <h2 className="font-display font-bold text-2xl text-ink-700 dark:text-ink-100 mb-1">
-            Bienvenido de vuelta.
+            Recuperar contraseña
           </h2>
           <p className="text-sm text-ink-400 dark:text-ink-300 mb-8">
-            Ingresa con tu cuenta corporativa de Vertiche.
+            Te enviaremos un código de verificación a tu correo.
           </p>
-
-          {showRecoveryToast && (
-            <div className="mb-6 rounded-card border border-flow/30 bg-flow-bg/50 px-3 py-2 text-sm text-flow">
-              Contraseña actualizada. Inicia sesión con tu nueva contraseña.
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -206,34 +166,6 @@ export function LoginPage() {
               />
             </div>
 
-            <div>
-              <label
-                htmlFor="password"
-                className="label-industrial text-ink-400 dark:text-ink-300 mb-1.5 block"
-              >
-                Contraseña
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={handlePasswordChange}
-                disabled={loading}
-                autoComplete="current-password"
-                placeholder="••••••••"
-                className="w-full px-3 py-2.5 bg-white dark:bg-ink-700 border border-ink-200 dark:border-ink-500 rounded-card text-sm text-ink-700 dark:text-ink-100 placeholder-ink-300 dark:placeholder-ink-500 focus:outline-none focus:border-ink-400 dark:focus:border-ink-300 focus:ring-2 focus:ring-ink-100 dark:focus:ring-ink-700 disabled:opacity-60 disabled:cursor-not-allowed"
-              />
-            </div>
-
-            <div className="flex justify-end">
-              <Link
-                to="/recuperar-contrasena"
-                className="text-xs text-ink-500 hover:text-ink-700 dark:text-ink-400 dark:hover:text-ink-200 transition-colors"
-              >
-                ¿Olvidaste tu contraseña?
-              </Link>
-            </div>
-
             {error && (
               <div className="p-3 bg-anomaly-bg border border-anomaly/20 rounded-card text-sm text-anomaly">
                 {error}
@@ -251,14 +183,23 @@ export function LoginPage() {
                 {loading ? (
                   <>
                     <Spinner />
-                    Iniciando sesión...
+                    Enviando código...
                   </>
                 ) : (
-                  'Continuar'
+                  'Enviar código'
                 )}
               </Button>
             </div>
           </form>
+
+          <div className="mt-6 text-center">
+            <Link
+              to="/"
+              className="text-xs text-ink-500 hover:text-ink-700 dark:text-ink-400 dark:hover:text-ink-200 transition-colors"
+            >
+              Volver al inicio de sesión
+            </Link>
+          </div>
         </div>
       </div>
     </div>

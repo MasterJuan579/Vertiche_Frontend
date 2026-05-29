@@ -21,7 +21,7 @@ export function SorterModule() {
       moduleName="Sorter & Bahía"
       moduleAccent={ACCENT}
       navItems={NAV}
-      user={{ name: session.user.name, role: 'Operador de Bahía' }}
+      user={{ name: session.user.nombre, role: 'Operador de Bahía' }}
       onLogout={signOut}
     >
       <Routes>

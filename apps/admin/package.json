@@ -1,0 +1,15 @@
+{
+  "name": "admin",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "main": "./src/index.jsx",
+  "dependencies": {
+    "@vertiche/design-system": "*"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  }
+}
