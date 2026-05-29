@@ -135,4 +135,15 @@ export const realApi = {
   getPalets() {
     return request('/Palet/listarPalets');
   },
+
+  // ============================================
+  // CREAR OC + PEDIDO + PALET en un solo paso
+  // (endpoint del módulo RFID)
+  // ============================================
+  crearOrdenCompra({ proveedor_id, nombre_producto, modelo, total_esperados }) {
+    return request('/rfid/orden-compra', {
+      method: 'POST',
+      body: { proveedor_id, nombre_producto, modelo, total_esperados },
+    });
+  },
 };

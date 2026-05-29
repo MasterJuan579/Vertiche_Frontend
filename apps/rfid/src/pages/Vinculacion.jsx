@@ -23,6 +23,7 @@ export function Vinculacion() {
   const [cargandoCatalogos, setCargandoCatalogos] = useState(true);
   const [enviando, setEnviando] = useState(false);
   const [errorCatalogos, setErrorCatalogos] = useState(null);
+  const [modalNuevaOC, setModalNuevaOC] = useState(false);
 
   useEffect(() => {
     cargarCatalogos();
@@ -68,6 +69,7 @@ export function Vinculacion() {
     if (!form.sku.trim()) errores.push('SKU');
     if (!form.tienda_id) errores.push('Tienda');
     if (!form.proveedor_id) errores.push('Proveedor');
+    if (!form.palet_id) errores.push('Palet / OC');
     return errores;
   }
 
@@ -210,21 +212,32 @@ export function Vinculacion() {
             </select>
           </FormField>
 
-          <FormField label="Palet / Orden de Compra (opcional)">
-            <select
-              value={form.palet_id}
-              onChange={(e) => set('palet_id', e.target.value)}
-              disabled={cargandoCatalogos}
-              className="w-full px-3 py-2 rounded-card text-[13px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid disabled:opacity-50 dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100"
-            >
-              <option value="">Sin palet (no aparecerá en el Gantt)</option>
-              {palets.map(p => (
-                <option key={p.palet_id} value={p.palet_id}>
-                  {p.palet_id}
-                  {p.OrdenCompra?.nombre_producto ? ` — ${p.OrdenCompra.nombre_producto} (${p.OrdenCompra.orden_id})` : ''}
-                </option>
-              ))}
-            </select>
+          <FormField label="Palet / Orden de Compra" required>
+            <div className="flex gap-2">
+              <select
+                value={form.palet_id}
+                onChange={(e) => set('palet_id', e.target.value)}
+                disabled={cargandoCatalogos}
+                className="flex-1 px-3 py-2 rounded-card text-[13px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid disabled:opacity-50 dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100"
+              >
+                <option value="">{cargandoCatalogos ? 'Cargando...' : 'Seleccionar palet / OC...'}</option>
+                {palets.map(p => (
+                  <option key={p.palet_id} value={p.palet_id}>
+                    {p.palet_id}
+                    {p.OrdenCompra?.nombre_producto ? ` — ${p.OrdenCompra.nombre_producto} (${p.OrdenCompra.orden_id})` : ''}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setModalNuevaOC(true)}
+                disabled={cargandoCatalogos || proveedores.length === 0}
+                title="Crear nueva orden de compra"
+                className="px-3 rounded-card text-[13px] font-semibold bg-rfid/10 text-rfid border border-rfid/30 hover:bg-rfid/20 disabled:opacity-50 dark:bg-rfid/20 dark:text-blue-300 dark:border-rfid/40"
+              >
+                + Nueva OC
+              </button>
+            </div>
           </FormField>
 
           <button
@@ -260,6 +273,156 @@ export function Vinculacion() {
           </div>
         )}
       </Panel>
+
+      {modalNuevaOC && (
+        <ModalNuevaOC
+          proveedores={proveedores}
+          onClose={() => setModalNuevaOC(false)}
+          onCreada={async (palet_id) => {
+            await cargarCatalogos();
+            setForm((prev) => ({ ...prev, palet_id }));
+            setModalNuevaOC(false);
+            setMensaje({ tipo: 'exito', texto: `Nueva OC creada y seleccionada (${palet_id}).` });
+            setTimeout(() => setMensaje(null), 4000);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Modal para crear OC + Pedido + Palet en un solo paso.
+ * Pega a POST /rfid/orden-compra.
+ */
+function ModalNuevaOC({ proveedores, onClose, onCreada }) {
+  const [form, setForm] = useState({
+    proveedor_id: proveedores[0]?.id || '',
+    nombre_producto: '',
+    modelo: '',
+    total_esperados: 10,
+  });
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState(null);
+
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const handleCrear = async () => {
+    setError(null);
+    if (!form.proveedor_id || !form.nombre_producto.trim() || !form.total_esperados) {
+      setError('Proveedor, nombre del producto y total son requeridos.');
+      return;
+    }
+    setEnviando(true);
+    try {
+      const res = await realApi.crearOrdenCompra({
+        proveedor_id: parseInt(form.proveedor_id, 10),
+        nombre_producto: form.nombre_producto.trim(),
+        modelo: form.modelo.trim() || null,
+        total_esperados: parseInt(form.total_esperados, 10),
+      });
+      await onCreada(res.palet.palet_id);
+    } catch (err) {
+      setError(err.message || 'Error al crear la OC');
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="w-[460px] max-w-[92vw] rounded-card border bg-white border-ink-100 shadow-xl dark:bg-ink-700 dark:border-ink-600"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-ink-100 dark:border-ink-600">
+          <div className="font-display text-[14px] font-bold text-ink-700 dark:text-ink-100">
+            Crear nueva orden de compra
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-7 h-7 rounded flex items-center justify-center text-lg text-ink-400 hover:bg-ink-50 dark:hover:bg-ink-600"
+          >
+            ×
+          </button>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          {error && (
+            <div className="px-3 py-2 rounded-card border text-[13px] bg-anomaly-bg border-anomaly-ring/40 text-anomaly dark:bg-anomaly/20 dark:border-anomaly-ring/40 dark:text-anomaly-ring">
+              {error}
+            </div>
+          )}
+
+          <FormField label="Proveedor" required>
+            <select
+              value={form.proveedor_id}
+              onChange={(e) => set('proveedor_id', e.target.value)}
+              className="w-full px-3 py-2 rounded-card text-[13px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100"
+            >
+              <option value="">Seleccionar...</option>
+              {proveedores.map((p) => (
+                <option key={p.id} value={p.id}>{p.codigo} — {p.nombre}</option>
+              ))}
+            </select>
+          </FormField>
+
+          <FormField label="Nombre del producto" required>
+            <input
+              type="text"
+              placeholder="Playera básica algodón"
+              value={form.nombre_producto}
+              onChange={(e) => set('nombre_producto', e.target.value)}
+              className="w-full px-3 py-2 rounded-card text-[13px] outline-none bg-white border border-ink-100 text-ink-700 placeholder:text-ink-400 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100"
+            />
+          </FormField>
+
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Modelo">
+              <input
+                type="text"
+                placeholder="PLAYERA-V1"
+                value={form.modelo}
+                onChange={(e) => set('modelo', e.target.value)}
+                className="w-full px-3 py-2 rounded-card text-[13px] outline-none bg-white border border-ink-100 text-ink-700 placeholder:text-ink-400 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100"
+              />
+            </FormField>
+            <FormField label="Total esperado" required>
+              <input
+                type="number"
+                min="1"
+                value={form.total_esperados}
+                onChange={(e) => set('total_esperados', e.target.value)}
+                className="w-full px-3 py-2 rounded-card text-[13px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100"
+              />
+            </FormField>
+          </div>
+
+          <div className="text-[11px] text-ink-400 dark:text-ink-300 mt-1">
+            Se generarán automáticamente: pedido, orden de compra y palet con IDs únicos.
+          </div>
+        </div>
+
+        <div className="flex gap-2 px-5 py-3 border-t border-ink-100 dark:border-ink-600">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={enviando}
+            className="flex-1 px-3 py-2 rounded-card text-[13px] font-semibold bg-ink-50 text-ink-500 hover:bg-ink-100 disabled:opacity-50 dark:bg-ink-600 dark:text-ink-200 dark:hover:bg-ink-500"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={handleCrear}
+            disabled={enviando}
+            className="flex-1 px-3 py-2 rounded-card text-[13px] font-semibold bg-rfid text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {enviando ? 'Creando...' : 'Crear OC'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
