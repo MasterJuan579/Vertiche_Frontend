@@ -2,7 +2,6 @@ import useDashboardStore from '../../../stores/dashboardStore';
 import { STAGE_BY_KEY } from '../../../utils/constants';
 import { getOperators, getStageItems } from '../../../utils/calculations';
 import { formatDateTime, getField } from '../../../utils/formatters';
-import styles from '../../../styles/modal.module.css';
 
 const DATASET_BY_STAGE = {
   preregistro: 'palets',
@@ -37,49 +36,48 @@ export function StageDetail({ stageKey }) {
   const operators = getOperators(data.inspecciones);
 
   return (
-    <div className={styles.stageDetail}>
-      <div className={styles.modalStats}>
-        <div>
-          <span>Total etapa</span>
-          <strong>{items.length || '--'}</strong>
+    <div className="max-h-[58vh] overflow-y-auto p-[18px]">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+        <div className="bg-ink-50 dark:bg-ink-600 border border-ink-100 dark:border-ink-600 rounded-card p-3">
+          <span className="text-ink-400 dark:text-ink-300 text-[11px] block">Total etapa</span>
+          <strong className="text-ink-700 dark:text-ink-100 text-base font-bold block mt-1">{items.length || '--'}</strong>
         </div>
-        <div>
-          <span>Fuente API</span>
-          <strong>{sourceItems.length || '--'}</strong>
+        <div className="bg-ink-50 dark:bg-ink-600 border border-ink-100 dark:border-ink-600 rounded-card p-3">
+          <span className="text-ink-400 dark:text-ink-300 text-[11px] block">Fuente API</span>
+          <strong className="text-ink-700 dark:text-ink-100 text-base font-bold block mt-1">{sourceItems.length || '--'}</strong>
         </div>
-        <div>
-          <span>Operadores</span>
-          <strong>{operators.length || '--'}</strong>
+        <div className="bg-ink-50 dark:bg-ink-600 border border-ink-100 dark:border-ink-600 rounded-card p-3">
+          <span className="text-ink-400 dark:text-ink-300 text-[11px] block">Operadores</span>
+          <strong className="text-ink-700 dark:text-ink-100 text-base font-bold block mt-1">{operators.length || '--'}</strong>
         </div>
       </div>
 
-      <div className={styles.stageBanner} style={{ borderColor: stage.color }}>
-        <span style={{ background: stage.color }} />
+      <div className="flex items-center gap-3 bg-ink-50 dark:bg-ink-600 border border-ink-100 dark:border-ink-600 rounded-card p-3 my-3" style={{ borderColor: stage.color }}>
+        <span className="rounded-pill h-3.5 w-3.5" style={{ background: stage.color }} />
         <div>
           <strong>{stage.title}</strong>
-          <p>{stage.label}</p>
+          <p className="text-ink-400 dark:text-ink-300 text-xs mt-0.5">{stage.label}</p>
         </div>
       </div>
 
-      <div className={styles.rows}>
+      <div className="grid gap-2">
         {items.length > 0 ? (
           items.slice(0, 12).map((item, index) => (
-            <div className={styles.row} key={item.id ?? item.epc ?? item.caja_id ?? item.palet_id ?? index}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-ink-50 dark:bg-ink-600 border border-ink-100 dark:border-ink-600 rounded-card p-3" key={item.id ?? item.epc ?? item.caja_id ?? item.palet_id ?? index}>
               <div>
-                <strong>{getField(item, ['epc', 'caja_id', 'palet_id', 'evento_id', 'id'])}</strong>
-                <span>{getField(item, ['sku', 'pedido_id', 'tipo_evento', 'estado', 'resultado'])}</span>
+                <strong className="text-ink-700 dark:text-ink-100 text-base font-bold block">{getField(item, ['epc', 'caja_id', 'palet_id', 'evento_id', 'id'])}</strong>
+                <span className="text-ink-400 dark:text-ink-300 text-[11px] block mt-1">{getField(item, ['sku', 'pedido_id', 'tipo_evento', 'estado', 'resultado'])}</span>
               </div>
               <div>
-                <strong>{getField(item, ['etapa_actual', 'etapa', 'bahia', 'ubicacion', 'estado'])}</strong>
-                <span>{formatDateTime(getField(item, ['timestamp', 'fecha_hora', 'createdAt', 'updatedAt'], null))}</span>
+                <strong className="text-ink-700 dark:text-ink-100 text-base font-bold block">{getField(item, ['etapa_actual', 'etapa', 'bahia', 'ubicacion', 'estado'])}</strong>
+                <span className="text-ink-400 dark:text-ink-300 text-[11px] block mt-1">{formatDateTime(getField(item, ['timestamp', 'fecha_hora', 'createdAt', 'updatedAt'], null))}</span>
               </div>
             </div>
           ))
         ) : (
-          <div className={styles.emptyRows}>--</div>
+          <div className="bg-ink-50 dark:bg-ink-600 border border-ink-100 dark:border-ink-600 rounded-card p-3 text-ink-300 dark:text-ink-400 text-center">--</div>
         )}
       </div>
     </div>
   );
 }
-

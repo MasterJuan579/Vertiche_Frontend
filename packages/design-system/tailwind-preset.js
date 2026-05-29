@@ -25,6 +25,7 @@ export default {
           500: '#3A4452',  // body text
           600: '#252D38',  // strong headings
           700: '#161B23',  // primary text
+          800: '#1A212C',  // elevated surface dark
           900: '#0A0D13',  // contrast accent
         },
         // Status semantics — the heart of the design system
