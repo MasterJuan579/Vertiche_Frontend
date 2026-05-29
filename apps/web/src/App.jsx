@@ -1,8 +1,13 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { RequireRole } from '@vertiche/design-system';
 
-// Auth pages (login + first-login password change)
-import { LoginPage, NewPasswordPage } from 'auth';
+// Auth pages (login + first-login password change + password recovery)
+import {
+  LoginPage,
+  NewPasswordPage,
+  ForgotPasswordPage,
+  ConfirmForgotPasswordPage,
+} from 'auth';
 
 // Per-role modules
 import { RfidModule } from 'rfid';
@@ -17,6 +22,11 @@ export default function App() {
       {/* Public auth routes */}
       <Route path="/" element={<LoginPage />} />
       <Route path="/nueva-contrasena" element={<NewPasswordPage />} />
+      <Route path="/recuperar-contrasena" element={<ForgotPasswordPage />} />
+      <Route
+        path="/recuperar-contrasena/confirmar"
+        element={<ConfirmForgotPasswordPage />}
+      />
 
       {/* Role-gated modules. The "/*" wildcard lets each module own its
           internal routing. RequireRole redirects to login if no session,

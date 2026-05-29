@@ -47,6 +47,26 @@ Configuración local:
 3. `npm install && npm run dev`.
 4. El backend debe estar corriendo en `VITE_API_URL`.
 
+### Recuperación de contraseña
+
+Quien olvide su contraseña puede recuperarla solo desde "¿Olvidaste tu contraseña?" en la LoginPage. El flujo:
+
+1. Ingresa el correo → Cognito envía un código de 6 dígitos.
+2. Ingresa el código + la nueva contraseña → la contraseña se restablece.
+3. Inicia sesión con la nueva contraseña.
+
+El código expira en 1 hora y Cognito envía el correo automáticamente. No hay auto-login: el usuario inicia sesión explícitamente después de restablecer.
+
+Para restablecimientos administrados (si el usuario no puede acceder a su correo), un `ADMIN` puede usar el AWS CLI:
+
+```bash
+aws cognito-idp admin-set-user-password \
+  --user-pool-id <POOL_ID> \
+  --username <correo-usuario> \
+  --password "<nueva-contrasena>" \
+  --permanent --region us-east-1
+```
+
 ---
 
 ## Estructura del monorepo
