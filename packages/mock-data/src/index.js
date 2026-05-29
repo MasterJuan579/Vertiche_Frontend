@@ -315,6 +315,13 @@ export const kpis = {
 // ─────────────────────────────────────────────────────────────
 
 export const mockUsers = {
+  ADMIN: {
+    sub: 'user-admin-001',
+    name: 'Admin del Sistema',
+    email: 'admin@vertiche.mx',
+    role: 'ADMIN',
+    module: 'admin',
+  },
   SUPERVISOR: {
     sub: 'user-supervisor-001',
     name: 'Moisés Falcón',

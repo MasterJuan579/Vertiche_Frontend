@@ -1,0 +1,21 @@
+@media screen {
+  .pdf-screen-hidden {
+    position: absolute;
+    left: -9999px;
+    top: 0;
+  }
+}
+
+@media print {
+  .pdf-screen-hidden {
+    position: static;
+    left: auto;
+  }
+  .pdf-print-hide {
+    display: none !important;
+  }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

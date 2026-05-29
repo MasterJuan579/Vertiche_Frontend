@@ -1,4 +1,6 @@
-// The auth "module" is just two public pages. The shell mounts them directly
-// at "/" and "/select-role" — no need for internal routing here.
+// The auth "module" is just the public auth pages. The shell mounts them
+// directly at "/" and "/nueva-contrasena" — no need for internal routing here.
 export { LoginPage } from './pages/LoginPage.jsx';
-export { RolePickerPage } from './pages/RolePickerPage.jsx';
+export { NewPasswordPage } from './pages/NewPasswordPage.jsx';
+export { ForgotPasswordPage } from './pages/ForgotPasswordPage.jsx';
+export { ConfirmForgotPasswordPage } from './pages/ConfirmForgotPasswordPage.jsx';

@@ -1,10 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
-import {
-  BAY_COLORS,
-  getPrepacksForBay,
-  getStoresByBay,
-} from '../data/demoData.js';
+import { BAY_COLORS } from '../data/demoData.js';
+import { listTiendas } from '../api/tiendas.js';
+import { listTagsCompletos } from '../api/tags.js';
 import { PrepackDetailPanel } from '../components/PrepackDetailPanel.jsx';
 
 /**
@@ -12,25 +10,81 @@ import { PrepackDetailPanel } from '../components/PrepackDetailPanel.jsx';
  * so the team at each station can pull from their own queue. The right
  * sidebar shows the selected prepack's full detail.
  *
- * Default selection: first prepack of the bay if any.
+ * Data: GET /Tag/listarTagsCompletos (each tag arrives with embedded tienda,
+ * proveedor, palet and orden_compra) + GET /Tienda/listarTiendas to know
+ * every store assigned to the bay even if it has zero prepacks yet.
  */
+
+function parseBahia(s) {
+  if (!s) return null;
+  const m = String(s).match(/(\d+)\s*$/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n >= 1 && n <= 10 ? n : null;
+}
+
+function enrichForPanel(tag, bayId) {
+  if (!tag) return null;
+  return {
+    ...tag,
+    bayNumber: bayId,
+    proveedor: tag.proveedor?.nombre || null,
+  };
+}
+
 export function BayScreen() {
   const { id } = useParams();
   const navigate = useNavigate();
 
   const bayId = parseInt(id, 10);
+  const validBay = Number.isFinite(bayId) && bayId >= 1 && bayId <= 10;
 
-  // Guard against bad URLs.
-  if (!Number.isFinite(bayId) || bayId < 1 || bayId > 10) {
+  const [tagsAll, setTagsAll] = useState([]);
+  const [tiendasAll, setTiendasAll] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selectedEpc, setSelectedEpc] = useState(null);
+
+  useEffect(() => {
+    if (!validBay) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setSelectedEpc(null);
+    Promise.all([listTagsCompletos(), listTiendas()])
+      .then(([tg, t]) => {
+        if (cancelled) return;
+        setTagsAll(Array.isArray(tg) ? tg : []);
+        setTiendasAll(Array.isArray(t) ? t : []);
+      })
+      .catch((e) => { if (!cancelled) setError(e); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [bayId, validBay]);
+
+  const bayColor = BAY_COLORS[bayId] || '#6b7280';
+  const allPrepacks = validBay
+    ? tagsAll.filter((t) => parseBahia(t.tienda?.bahia_asignada) === bayId)
+    : [];
+  const stores = validBay
+    ? tiendasAll.filter((t) => parseBahia(t.bahia_asignada) === bayId)
+    : [];
+
+  // Auto-select first prepack once data lands
+  useEffect(() => {
+    if (!selectedEpc && allPrepacks.length > 0) {
+      setSelectedEpc(allPrepacks[0].epc);
+    }
+  }, [allPrepacks, selectedEpc]);
+
+  if (!validBay) {
     return <Navigate to="/sorter/bahias" replace />;
   }
 
-  const bayColor = BAY_COLORS[bayId] || '#6b7280';
-  const allPrepacks = getPrepacksForBay(bayId);
-  const stores = (getStoresByBay()[bayId] || []);
-
-  const [selectedEpc, setSelectedEpc] = useState(allPrepacks[0]?.epc ?? null);
-  const selected = allPrepacks.find((p) => p.epc === selectedEpc) || null;
+  const selected = enrichForPanel(
+    allPrepacks.find((p) => p.epc === selectedEpc) || null,
+    bayId
+  );
 
   // Round-robin into 3 stations.
   const stations = [1, 2, 3].map((termNum) => ({
@@ -74,6 +128,7 @@ export function BayScreen() {
           </div>
           <div className="font-mono text-[11px] text-ink-400 truncate">
             {allPrepacks.length} prepack{allPrepacks.length !== 1 ? 's' : ''} · {stores.length} tienda{stores.length !== 1 ? 's' : ''}
+            {loading && ' · cargando…'}
           </div>
         </div>
 
@@ -85,6 +140,13 @@ export function BayScreen() {
           </span>
         </div>
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="px-6 py-2 border-b border-anomaly-ring/40 bg-anomaly-bg text-anomaly text-[12px] dark:bg-anomaly/20 dark:text-anomaly-ring shrink-0">
+          No se pudo conectar al backend{error.status ? ` (HTTP ${error.status})` : ''}: {error.message}
+        </div>
+      )}
 
       {/* ───── Body: 3-station grid + right panel ───── */}
       <div className="flex-1 flex overflow-hidden min-h-0">
@@ -102,6 +164,8 @@ export function BayScreen() {
               bayColor={bayColor}
               selectedEpc={selectedEpc}
               onSelect={setSelectedEpc}
+              loading={loading}
+              hasError={!!error}
             />
           ))}
         </div>
@@ -119,7 +183,7 @@ export function BayScreen() {
 // Sub-components
 // ──────────────────────────────────────────────────────────────────
 
-function StationColumn({ terminal, prepacks, bayColor, selectedEpc, onSelect }) {
+function StationColumn({ terminal, prepacks, bayColor, selectedEpc, onSelect, loading, hasError }) {
   return (
     <div className={
       'flex flex-col overflow-hidden ' +
@@ -140,7 +204,13 @@ function StationColumn({ terminal, prepacks, bayColor, selectedEpc, onSelect }) 
 
       {/* Prepack cards */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {prepacks.length === 0 && (
+        {loading && prepacks.length === 0 && (
+          <p className="text-center text-[11px] text-ink-400 mt-4">
+            Cargando…
+          </p>
+        )}
+
+        {!loading && !hasError && prepacks.length === 0 && (
           <p className="text-center text-[11px] text-ink-400 mt-4">
             Sin prepacks asignados
           </p>
@@ -161,6 +231,7 @@ function StationColumn({ terminal, prepacks, bayColor, selectedEpc, onSelect }) 
 }
 
 function PrepackCard({ p, bayColor, isSelected, onClick }) {
+  const titulo = p.producto || p.sku || '—';
   return (
     <button
       type="button"
@@ -190,16 +261,16 @@ function PrepackCard({ p, bayColor, isSelected, onClick }) {
         >
           ···{p.epc.slice(-4)}
         </span>
-        <span className="font-mono text-[9px] text-ink-400">{p.orden_id}</span>
+        <span className="font-mono text-[9px] text-ink-400">{p.orden_id || '—'}</span>
       </div>
       <div className="mt-1 text-[12px] font-semibold text-ink-700 dark:text-ink-100 truncate">
-        {p.producto}
+        {titulo}
       </div>
       <div className="text-[10px] text-ink-400 truncate">
-        {p.colores.join(' · ')} — {p.tallas.join(', ')} · {p.total_prendas}p
+        {p.color || '—'} — {p.talla || '—'} · {p.cantidad_piezas ?? 0}p
       </div>
       <div className="text-[10px] text-ink-400 truncate">
-        {p.tienda?.nombre}
+        {p.tienda?.nombre || '—'}
       </div>
     </button>
   );
