@@ -1,6 +1,3 @@
-import styles from '../../styles/modal.module.css';
-
 export function ModalContent({ children }) {
-  return <div className={styles.mContent}>{children}</div>;
+  return <div className="max-h-[58vh] overflow-y-auto p-[18px]">{children}</div>;
 }
-

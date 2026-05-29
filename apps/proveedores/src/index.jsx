@@ -23,7 +23,7 @@ export function ProveedoresModule() {
       moduleName="Calidad Proveedores"
       moduleAccent={ACCENT}
       navItems={NAV}
-      user={{ name: session.user.name, role: 'Inspector QA' }}
+      user={{ name: session.user.nombre, role: 'Inspector QA' }}
       onLogout={signOut}
     >
       <Routes>

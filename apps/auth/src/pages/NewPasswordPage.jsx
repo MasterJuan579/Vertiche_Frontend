@@ -1,20 +1,15 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Button, ThemeToggle, useAuth, ROLE_HOMES } from '@vertiche/design-system';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Button, useAuth, ROLE_HOMES } from '@vertiche/design-system';
 
-// Maps a signIn() failure code to a user-facing Spanish message.
-function errorMessage(code) {
-  switch (code) {
-    case 'NotAuthorizedException':
-      return 'Email o contraseña incorrectos.';
-    case 'not_registered':
-      return 'Tu cuenta no está registrada en el sistema. Contacta a un administrador.';
-    case 'UserNotConfirmedException':
-      return 'Tu cuenta no está verificada. Contacta a un administrador.';
-    default:
-      return 'No se pudo iniciar sesión. Intenta de nuevo.';
-  }
-}
+// Cognito's default password policy. Each rule is shown live as the user types.
+const RULES = [
+  { key: 'len', label: 'Mínimo 8 caracteres', test: (p) => p.length >= 8 },
+  { key: 'upper', label: 'Una letra mayúscula', test: (p) => /[A-Z]/.test(p) },
+  { key: 'lower', label: 'Una letra minúscula', test: (p) => /[a-z]/.test(p) },
+  { key: 'num', label: 'Un número', test: (p) => /[0-9]/.test(p) },
+  { key: 'sym', label: 'Un símbolo', test: (p) => /[^A-Za-z0-9]/.test(p) },
+];
 
 function Spinner() {
   return (
@@ -41,64 +36,84 @@ function Spinner() {
   );
 }
 
-export function LoginPage() {
+function Rule({ met, label }) {
+  return (
+    <li className="flex items-center gap-2 text-xs">
+      <span
+        className={`inline-flex items-center justify-center w-4 h-4 ${
+          met ? 'text-flow' : 'text-ink-300'
+        }`}
+        aria-hidden="true"
+      >
+        {met ? '✓' : '○'}
+      </span>
+      <span className={met ? 'text-ink-600' : 'text-ink-400'}>{label}</span>
+    </li>
+  );
+}
+
+export function NewPasswordPage() {
   const navigate = useNavigate();
-  const { session, signIn } = useAuth();
-  const [email, setEmail] = useState('');
+  const location = useLocation();
+  // `session` here is the Cognito challenge Session string, NOT our app session.
+  const { email, session: cognitoSession } = location.state || {};
+
+  const { session: appSession, completeNewPassword } = useAuth();
   const [password, setPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Once a session exists (fresh login or already-authenticated visit to "/"),
-  // bounce to the role's module home. Doing this in an effect — rather than
-  // reading session right after await signIn() — avoids a stale-closure read,
-  // since the context state hasn't re-rendered yet at that point.
+  // After the password is set, completeNewPassword installs the app session;
+  // navigate to the role home once it lands (same pattern as LoginPage).
   useEffect(() => {
-    if (session) {
-      navigate(ROLE_HOMES[session.user.role] || '/', { replace: true });
+    if (appSession) {
+      navigate(ROLE_HOMES[appSession.user.role] || '/', { replace: true });
     }
-  }, [session, navigate]);
+  }, [appSession, navigate]);
+
+  // Reached directly without going through LoginPage's challenge → no session
+  // to answer. Send them back to login.
+  if (!email || !cognitoSession) {
+    return <Navigate to="/" replace />;
+  }
+
+  const rulesPassed = RULES.map((r) => r.test(password));
+  const allRulesPass = rulesPassed.every(Boolean);
+  const passwordsMatch = confirm.length > 0 && password === confirm;
+  const canSubmit = allRulesPass && passwordsMatch && !loading;
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!canSubmit) return;
+
     setError('');
     setLoading(true);
 
-    const result = await signIn(email, password);
+    const result = await completeNewPassword(email, password, cognitoSession);
 
     if (result.status === 'success') {
-      // Keep the spinner up; the effect above navigates once session lands.
-      return;
-    }
-    if (
-      result.status === 'challenge' &&
-      result.challengeName === 'NEW_PASSWORD_REQUIRED'
-    ) {
-      navigate('/nueva-contrasena', {
-        state: { email: result.email, session: result.session },
-      });
+      // Keep the spinner up; the effect navigates once the session lands.
       return;
     }
 
     setLoading(false);
-    setError(errorMessage(result.code));
+    setError('No se pudo cambiar la contraseña. Vuelve a intentar.');
   }
 
-  // Clear the error as soon as the user edits either field.
-  function handleEmailChange(e) {
-    setEmail(e.target.value);
-    if (error) setError('');
-  }
   function handlePasswordChange(e) {
     setPassword(e.target.value);
     if (error) setError('');
   }
+  function handleConfirmChange(e) {
+    setConfirm(e.target.value);
+    if (error) setError('');
+  }
 
   return (
-    <div className="min-h-screen bg-ink-50 dark:bg-ink-900 flex">
-      {/* Left panel: branding */}
+    <div className="min-h-screen bg-ink-50 flex">
+      {/* Left panel: branding — same as LoginPage */}
       <div className="hidden md:flex md:w-1/2 lg:w-3/5 bg-ink-700 text-white p-12 relative overflow-hidden">
-        {/* Subtle grid background */}
         <div
           className="absolute inset-0 opacity-[0.04]"
           style={{
@@ -147,11 +162,8 @@ export function LoginPage() {
         </div>
       </div>
 
-      {/* Right panel: form */}
-      <div className="flex-1 flex items-center justify-center p-8 relative">
-        <div className="absolute top-6 right-6">
-          <ThemeToggle />
-        </div>
+      {/* Right panel: new-password form */}
+      <div className="flex-1 flex items-center justify-center p-8">
         <div className="w-full max-w-sm">
           <div className="md:hidden mb-8">
             <div className="w-10 h-10 rounded-md bg-ink-700 flex items-center justify-center font-display font-bold text-white">
@@ -159,54 +171,65 @@ export function LoginPage() {
             </div>
           </div>
 
-          <div className="label-industrial text-ink-400 dark:text-ink-300 mb-2">
-            Inicio de sesión
+          <div className="label-industrial text-ink-400 mb-2">
+            Primer inicio de sesión
           </div>
-          <h2 className="font-display font-bold text-2xl text-ink-700 dark:text-ink-100 mb-1">
-            Bienvenido de vuelta.
+          <h2 className="font-display font-bold text-2xl text-ink-700 mb-1">
+            Crea tu contraseña
           </h2>
-          <p className="text-sm text-ink-400 dark:text-ink-300 mb-8">
-            Ingresa con tu cuenta corporativa de Vertiche.
+          <p className="text-sm text-ink-400 mb-8">
+            Es tu primer inicio de sesión. Define una contraseña permanente.
           </p>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label
-                htmlFor="email"
-                className="label-industrial text-ink-400 dark:text-ink-300 mb-1.5 block"
+                htmlFor="new-password"
+                className="label-industrial text-ink-400 mb-1.5 block"
               >
-                Correo
+                Nueva contraseña
               </label>
               <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={handleEmailChange}
+                id="new-password"
+                type="password"
+                value={password}
+                onChange={handlePasswordChange}
                 disabled={loading}
-                autoComplete="username"
-                placeholder="nombre@vertiche.mx"
-                className="w-full px-3 py-2.5 bg-white dark:bg-ink-700 border border-ink-200 dark:border-ink-500 rounded-card text-sm text-ink-700 dark:text-ink-100 placeholder-ink-300 dark:placeholder-ink-500 focus:outline-none focus:border-ink-400 dark:focus:border-ink-300 focus:ring-2 focus:ring-ink-100 dark:focus:ring-ink-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                autoComplete="new-password"
+                placeholder="••••••••"
+                className="w-full px-3 py-2.5 bg-white border border-ink-200 rounded-card text-sm text-ink-700 placeholder-ink-300 focus:outline-none focus:border-ink-400 focus:ring-2 focus:ring-ink-100 disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
 
             <div>
               <label
-                htmlFor="password"
-                className="label-industrial text-ink-400 dark:text-ink-300 mb-1.5 block"
+                htmlFor="confirm-password"
+                className="label-industrial text-ink-400 mb-1.5 block"
               >
-                Contraseña
+                Confirmar contraseña
               </label>
               <input
-                id="password"
+                id="confirm-password"
                 type="password"
-                value={password}
-                onChange={handlePasswordChange}
+                value={confirm}
+                onChange={handleConfirmChange}
                 disabled={loading}
-                autoComplete="current-password"
+                autoComplete="new-password"
                 placeholder="••••••••"
-                className="w-full px-3 py-2.5 bg-white dark:bg-ink-700 border border-ink-200 dark:border-ink-500 rounded-card text-sm text-ink-700 dark:text-ink-100 placeholder-ink-300 dark:placeholder-ink-500 focus:outline-none focus:border-ink-400 dark:focus:border-ink-300 focus:ring-2 focus:ring-ink-100 dark:focus:ring-ink-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                className="w-full px-3 py-2.5 bg-white border border-ink-200 rounded-card text-sm text-ink-700 placeholder-ink-300 focus:outline-none focus:border-ink-400 focus:ring-2 focus:ring-ink-100 disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
+
+            {/* Live validation checklist */}
+            <ul className="space-y-1.5 pt-1">
+              {RULES.map((rule, i) => (
+                <Rule key={rule.key} met={rulesPassed[i]} label={rule.label} />
+              ))}
+              <Rule
+                met={passwordsMatch}
+                label="Las contraseñas coinciden"
+              />
+            </ul>
 
             {error && (
               <div className="p-3 bg-anomaly-bg border border-anomaly/20 rounded-card text-sm text-anomaly">
@@ -220,15 +243,15 @@ export function LoginPage() {
                 variant="primary"
                 size="lg"
                 className="w-full"
-                disabled={loading}
+                disabled={!canSubmit}
               >
                 {loading ? (
                   <>
                     <Spinner />
-                    Iniciando sesión...
+                    Guardando...
                   </>
                 ) : (
-                  'Continuar'
+                  'Guardar contraseña'
                 )}
               </Button>
             </div>

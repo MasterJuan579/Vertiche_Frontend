@@ -1,6 +1,6 @@
 export function TabBar({ tabs, activeId, onSelect, accent }) {
   return (
-    <div className="flex gap-1 border-b border-ink-100 bg-white px-6">
+    <div className="flex gap-1 border-b border-ink-100 dark:border-ink-600 bg-white dark:bg-ink-700 px-6">
       {tabs.map((tab) => {
         const active = tab.id === activeId;
         return (
@@ -8,12 +8,12 @@ export function TabBar({ tabs, activeId, onSelect, accent }) {
             key={tab.id}
             onClick={() => onSelect(tab.id)}
             className={`relative px-4 py-3 text-sm font-display font-semibold transition-colors ${
-              active ? 'text-ink-700' : 'text-ink-400 hover:text-ink-700'
+              active ? 'text-ink-700 dark:text-ink-100' : 'text-ink-400 dark:text-ink-300 hover:text-ink-700 dark:hover:text-ink-100'
             }`}
           >
             {tab.label}
             {tab.badge !== undefined && (
-              <span className="ml-2 text-[10px] font-mono text-ink-400 tabular">
+              <span className="ml-2 text-[10px] font-mono text-ink-400 dark:text-ink-300 tabular">
                 {tab.badge}
               </span>
             )}
