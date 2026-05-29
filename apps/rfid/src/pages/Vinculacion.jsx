@@ -326,11 +326,27 @@ function ModalAsignarEPC({ prepack, onClose, onAsignar }) {
   const [epc, setEpc] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState(null);
+  const [autoDetectado, setAutoDetectado] = useState(false);
+
+  // Mientras el modal está abierto, escucha el socket 'uid-detectado' que
+  // emite el backend cuando el Lector 1 del ESP32 lee un chip nuevo.
+  // Auto-rellena el campo y resalta visualmente.
+  useEffect(() => {
+    const off = onSocket('uid-detectado', (ev) => {
+      if (ev?.uid) {
+        setEpc(ev.uid);
+        setAutoDetectado(true);
+        setError(null);
+        setTimeout(() => setAutoDetectado(false), 1500);
+      }
+    });
+    return off;
+  }, []);
 
   const handle = async () => {
     setError(null);
     if (!epc.trim()) {
-      setError('Captura el EPC del tag físico.');
+      setError('Captura el EPC del tag físico (manual o con el lector ESP32).');
       return;
     }
     setEnviando(true);
@@ -380,14 +396,23 @@ function ModalAsignarEPC({ prepack, onClose, onAsignar }) {
           <FormField label="EPC real del tag físico" required>
             <input
               type="text"
-              placeholder="Ej: E2806894…"
+              placeholder="Acerca un chip al lector o escribe el EPC…"
               value={epc}
-              onChange={(e) => setEpc(e.target.value)}
+              onChange={(e) => { setEpc(e.target.value); setAutoDetectado(false); }}
               onKeyDown={(e) => e.key === 'Enter' && handle()}
               autoFocus
-              className="w-full px-3 py-2 rounded-card text-[12px] font-mono outline-none bg-white border border-ink-100 text-ink-700 placeholder:text-ink-400 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100"
+              className={`w-full px-3 py-2 rounded-card text-[12px] font-mono outline-none border text-ink-700 placeholder:text-ink-400 focus:border-rfid dark:text-ink-100 transition-colors ${
+                autoDetectado
+                  ? 'bg-flow/10 border-flow-ring dark:bg-flow/20 dark:border-flow-ring'
+                  : 'bg-white border-ink-100 dark:bg-ink-700 dark:border-ink-500'
+              }`}
             />
           </FormField>
+
+          <div className="flex items-center gap-2 text-[10px] text-ink-400 dark:text-ink-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-flow-ring animate-pulse" />
+            <span>Esperando lectura del ESP32 (Lector 1 — Registro)…</span>
+          </div>
         </div>
 
         <div className="flex gap-2 px-5 py-3 border-t border-ink-100 dark:border-ink-600">
