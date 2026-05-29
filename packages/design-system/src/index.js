@@ -28,6 +28,8 @@ export {
   respondToNewPasswordChallenge,
   globalSignOut,
   refreshTokens,
+  sendEmailVerificationCode,
+  verifyEmailAttribute,
   cognitoConfig,
 } from './cognito.js';
 

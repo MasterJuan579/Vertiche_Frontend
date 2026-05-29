@@ -31,6 +31,8 @@ import {
   respondToNewPasswordChallenge,
   forgotPassword as cognitoForgotPassword,
   confirmForgotPassword as cognitoConfirmForgotPassword,
+  sendEmailVerificationCode as cognitoSendEmailVerificationCode,
+  verifyEmailAttribute as cognitoVerifyEmailAttribute,
   globalSignOut,
 } from './cognito.js';
 
@@ -161,9 +163,55 @@ export function AuthProvider({ children }) {
   );
 
   /**
+   * Email-verification gate, applied to every path that obtains tokens (normal
+   * sign-in AND first-login password change). If the idToken says the email is
+   * verified, install the session as usual. Otherwise: confirm the user is
+   * provisioned in MySQL, email a verification code, and return 'verify_email'
+   * WITHOUT persisting a session — so RequireRole still blocks every module.
+   * Returns { status: 'success' } | { status: 'verify_email', email, tokens }
+   *       | { status: 'error', code, message? }.
+   */
+  const gateOrEstablish = useCallback(
+    async (tokens, email) => {
+      const claims = decodeJwtPayload(tokens.idToken);
+      if (claims.email_verified === true || claims.email_verified === 'true') {
+        return establishSession(tokens, email);
+      }
+
+      // Unverified — confirm the user exists in MySQL before sending any code.
+      let meRes;
+      try {
+        meRes = await fetch(`${API_URL}/Auth/me`, {
+          headers: { Authorization: `Bearer ${tokens.idToken}` },
+        });
+      } catch {
+        return { status: 'error', code: 'NetworkError' };
+      }
+      if (meRes.status === 404) {
+        return { status: 'error', code: 'not_registered' };
+      }
+      if (!meRes.ok) {
+        return {
+          status: 'error',
+          code: 'me_failed',
+          message: `/Auth/me returned ${meRes.status}`,
+        };
+      }
+
+      const sent = await cognitoSendEmailVerificationCode(tokens.accessToken);
+      if (sent.status === 'error') {
+        return sent;
+      }
+      return { status: 'verify_email', email, tokens };
+    },
+    [establishSession]
+  );
+
+  /**
    * Email/password sign-in. Returns:
    *   { status: 'success' }
    *   { status: 'challenge', challengeName, session, email }  (NEW_PASSWORD_REQUIRED)
+   *   { status: 'verify_email', email, tokens }  (email not verified yet)
    *   { status: 'error', code, message? }  (code: 'not_registered' | Cognito exception | ...)
    */
   const signIn = useCallback(
@@ -181,15 +229,16 @@ export function AuthProvider({ children }) {
       if (result.status === 'error') {
         return result;
       }
-      return establishSession(result.tokens, email);
+      return gateOrEstablish(result.tokens, email);
     },
-    [establishSession]
+    [gateOrEstablish]
   );
 
   /**
-   * Answer the NEW_PASSWORD_REQUIRED challenge, then complete sign-in exactly
-   * like signIn's success path. `cognitoSession` is the Session string returned
-   * by the original initiateAuth challenge.
+   * Answer the NEW_PASSWORD_REQUIRED challenge, then run the same verification
+   * gate as signIn. `cognitoSession` is the Session string returned by the
+   * original initiateAuth challenge. Can return 'verify_email' for brand-new
+   * users whose email isn't verified yet.
    */
   const completeNewPassword = useCallback(
     async (email, newPassword, cognitoSession) => {
@@ -204,9 +253,9 @@ export function AuthProvider({ children }) {
       if (result.status !== 'success') {
         return { status: 'error', code: 'UnexpectedResponse' };
       }
-      return establishSession(result.tokens, email);
+      return gateOrEstablish(result.tokens, email);
     },
-    [establishSession]
+    [gateOrEstablish]
   );
 
   // Password recovery. These are thin pass-throughs to Cognito: neither
@@ -220,6 +269,35 @@ export function AuthProvider({ children }) {
   const confirmForgotPassword = useCallback(
     (email, code, newPassword) =>
       cognitoConfirmForgotPassword(email, code, newPassword),
+    []
+  );
+
+  /**
+   * Finish a 'verify_email' login: verify the emailed code, then re-authenticate
+   * (to mint an idToken with email_verified=true) and install the session.
+   * `password` is needed for the re-auth; the verify page still has it in state.
+   */
+  const confirmEmailAndFinish = useCallback(
+    async (email, password, code, accessToken) => {
+      const verified = await cognitoVerifyEmailAttribute(accessToken, code);
+      if (verified.status === 'error') {
+        return verified;
+      }
+      // Re-auth so the new idToken reflects email_verified=true.
+      const reauth = await initiateAuth(email, password);
+      if (reauth.status === 'error') {
+        return reauth;
+      }
+      if (reauth.status !== 'success') {
+        return { status: 'error', code: 'UnexpectedResponse' };
+      }
+      return establishSession(reauth.tokens, email);
+    },
+    [establishSession]
+  );
+
+  const resendEmailVerificationCode = useCallback(
+    (accessToken) => cognitoSendEmailVerificationCode(accessToken),
     []
   );
 
@@ -246,6 +324,8 @@ export function AuthProvider({ children }) {
       completeNewPassword,
       forgotPassword,
       confirmForgotPassword,
+      confirmEmailAndFinish,
+      resendEmailVerificationCode,
       signOut,
     }),
     [
@@ -255,6 +335,8 @@ export function AuthProvider({ children }) {
       completeNewPassword,
       forgotPassword,
       confirmForgotPassword,
+      confirmEmailAndFinish,
+      resendEmailVerificationCode,
       signOut,
     ]
   );

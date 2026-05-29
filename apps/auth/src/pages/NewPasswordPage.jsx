@@ -96,6 +96,14 @@ export function NewPasswordPage() {
       // Keep the spinner up; the effect navigates once the session lands.
       return;
     }
+    if (result.status === 'verify_email') {
+      // Brand-new user whose email isn't verified yet. Carry the just-set
+      // password forward (the verify page re-auths with it). No session stored.
+      navigate('/verificar-email', {
+        state: { email, password, accessToken: result.tokens.accessToken },
+      });
+      return;
+    }
 
     setLoading(false);
     setError('No se pudo cambiar la contraseña. Vuelve a intentar.');

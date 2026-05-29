@@ -81,6 +81,14 @@ export function LoginPage() {
       // Keep the spinner up; the effect above navigates once session lands.
       return;
     }
+    if (result.status === 'verify_email') {
+      // Email not verified — carry email + password (for re-auth) + access token
+      // to the verify page. No session is stored, so the user isn't logged in.
+      navigate('/verificar-email', {
+        state: { email, password, accessToken: result.tokens.accessToken },
+      });
+      return;
+    }
     if (
       result.status === 'challenge' &&
       result.challengeName === 'NEW_PASSWORD_REQUIRED'
