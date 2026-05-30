@@ -129,9 +129,8 @@ export function getOperators(inspecciones) {
   return Array.from(
     new Set(
       inspecciones
-        .map((item) => item.operador ?? item.inspector ?? item.usuario)
+        .map((item) => item.operador_id ?? item.operador ?? item.inspector ?? item.usuario)
         .filter(Boolean),
     ),
   );
 }
-
