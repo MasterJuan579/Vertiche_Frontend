@@ -9,12 +9,30 @@ function normalizeList(payload) {
   return [];
 }
 
+function classifyError(err) {
+  if (!err) return { type: 'unknown', message: 'Error desconocido' };
+  if (err.status === 0) {
+    return { type: 'network', message: 'No se pudo conectar con el servidor. Verifica tu red o que el backend esté activo.' };
+  }
+  if (err.status === 404) {
+    return { type: 'not_found', message: 'Recurso no encontrado (404).' };
+  }
+  if (err.status >= 500) {
+    return { type: 'server', message: err.detail || err.message || `Error del servidor (${err.status})` };
+  }
+  return {
+    type: 'request',
+    message: err.detail || err.message || `Error HTTP ${err.status || ''}`,
+  };
+}
+
 async function getList(endpoint) {
   try {
     return normalizeList(await apiGet(endpoint));
   } catch (err) {
-    if (err?.status === 404) return [];
-    throw err;
+    const classified = classifyError(err);
+    if (classified.type === 'not_found') return [];
+    throw { ...err, ...classified, endpoint };
   }
 }
 
