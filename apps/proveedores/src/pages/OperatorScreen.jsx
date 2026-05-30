@@ -43,6 +43,7 @@ const STEP_DOT_CLS = {
 export function OperatorScreen() {
   const [review, setReview]         = useState(null);
   const [siniestros, setSiniestros] = useState([]);
+  const [reviewRating, setReviewRating] = useState(null);
   const [sinStep, setSinStep]       = useState(SINIESTRO_IDLE);
   const [sinDraft, setSinDraft]     = useState({ type: null, notes: '', otherText: '', ppk: null });
   const [rfidInput, setRfidInput]   = useState('');
@@ -61,6 +62,7 @@ export function OperatorScreen() {
       sampleSize: calcSampleSize(supplier.stars, scenario.qty),
     });
     setSiniestros([]);
+    setReviewRating(null);
     setSinStep(SINIESTRO_IDLE);
     setSinDraft({ type: null, notes: '', otherText: '', ppk: null });
     setRfidInput('');
@@ -69,7 +71,7 @@ export function OperatorScreen() {
   };
 
   const finishReview = () => {
-    if (!review) return;
+    if (!review || reviewRating === null) return;
     // In production: POST each siniestro, PUT updated rating.
     // For mock-only: just clear state and bump the cycle counter.
     setReview(null);
@@ -150,6 +152,7 @@ export function OperatorScreen() {
   const { supplier, profile, scenario } = review;
   const rejected = siniestros.filter((s) => s.decision === 'reject').length;
   const observed = siniestros.filter((s) => s.decision === 'pass').length;
+  const canFinish = reviewRating !== null;
 
   return (
     <div className="px-8 py-5 max-w-[1400px] mx-auto">
@@ -332,6 +335,41 @@ export function OperatorScreen() {
             )}
           </SectionCard>
         </div>
+
+        {/* ───── SECCIÓN 4 — Calificación final (full width) ───── */}
+        <div className="col-span-2">
+          <SectionCard step="4" label="Calificación final" dot="blue">
+            <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
+              <div>
+                <p className="text-[12px] text-ink-500 dark:text-ink-300 mb-2">
+                  Asigna la nota final del proveedor basado en la revisión que acabas de realizar.
+                  Si encontraste defectos, selecciona la calificación que refleje la experiencia real.
+                </p>
+                <div className="flex items-center gap-2">
+                  <Stars
+                    rating={reviewRating || 0}
+                    size={20}
+                    interactive
+                    onChange={(value) => setReviewRating(value)}
+                  />
+                  <span className="text-sm font-semibold text-ink-700 dark:text-ink-100">
+                    {reviewRating ? `${reviewRating} de 5` : 'Sin calificación'}
+                  </span>
+                </div>
+              </div>
+              <div className="rounded-card border border-ink-100 bg-ink-50 p-3 text-[12px] text-ink-500 dark:border-ink-600 dark:bg-ink-600 dark:text-ink-300">
+                {siniestros.length === 0 ? (
+                  <p>No se registraron defectos en la muestra. Elige manualmente la calificación.</p>
+                ) : (
+                  <p>
+                    Se detectaron {siniestros.length} defectos. Selecciona la calificación que mejor
+                    represente la calidad del proveedor en esta revisión.
+                  </p>
+                )}
+              </div>
+            </div>
+          </SectionCard>
+        </div>
       </div>
 
       {/* ───── Footer — finish review ───── */}
@@ -341,9 +379,12 @@ export function OperatorScreen() {
         </p>
         <button
           onClick={finishReview}
+          disabled={!canFinish}
           className={
-            'shrink-0 px-6 py-3 rounded-card font-display text-sm font-semibold text-white ' +
-            'bg-flow hover:bg-green-700 transition-colors'
+            'shrink-0 px-6 py-3 rounded-card font-display text-sm font-semibold transition-colors ' +
+            (canFinish
+              ? 'text-white bg-flow hover:bg-green-700'
+              : 'text-ink-400 bg-ink-100 cursor-not-allowed dark:bg-ink-600 dark:text-ink-500')
           }
         >
           Terminar revisión →
