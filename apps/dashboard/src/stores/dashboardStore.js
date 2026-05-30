@@ -17,6 +17,7 @@ const useDashboardStore = create(
 
       loading: true,
       error: null,
+      errors: {},
       lastUpdate: null,
       drawerOpen: false,
       modalOpen: false,
@@ -42,4 +43,3 @@ const useDashboardStore = create(
 );
 
 export default useDashboardStore;
-

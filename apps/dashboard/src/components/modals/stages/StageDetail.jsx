@@ -70,7 +70,7 @@ export function StageDetail({ stageKey }) {
               </div>
               <div>
                 <strong className="text-ink-700 dark:text-ink-100 text-base font-bold block">{getField(item, ['etapa_actual', 'etapa', 'bahia', 'ubicacion', 'estado'])}</strong>
-                <span className="text-ink-400 dark:text-ink-300 text-[11px] block mt-1">{formatDateTime(getField(item, ['timestamp', 'fecha_hora', 'createdAt', 'updatedAt'], null))}</span>
+                <span className="text-ink-400 dark:text-ink-300 text-[11px] block mt-1">{formatDateTime(getField(item, ['timestamp', 'fecha_hora', 'fecha', 'createdAt', 'updatedAt'], null))}</span>
               </div>
             </div>
           ))
