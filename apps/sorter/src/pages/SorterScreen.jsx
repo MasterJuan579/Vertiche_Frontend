@@ -51,6 +51,8 @@ function lecturaToPrepack(payload) {
 export function SorterScreen() {
   const [current, setCurrent] = useState(null);
   const [history, setHistory] = useState([]);
+  const [scanning, setScanning] = useState(false);
+  const [liveStatus, setLiveStatus] = useState('connecting');
   const [scanRate, setScanRate] = useState(0);
   const [totalScanned, setTotalScanned] = useState(0);
   const [selected, setSelected] = useState(null);
@@ -67,29 +69,63 @@ export function SorterScreen() {
     return () => clearInterval(id);
   }, []);
 
+  const processScan = useCallback((prepack) => {
+    if (!prepack) return;
+    const scan = {
+      ...prepack,
+      id: prepack.scanId || `${prepack.epc}-${Date.now()}`,
+      scannedAt: Date.now(),
+    };
+  }, []);
+
   useEffect(() => {
     let socket;
     let cancelled = false;
-    connectRealtime({
-      connect: () => { if (!cancelled) setConnected(true); },
-      disconnect: () => { if (!cancelled) setConnected(false); },
-      lectura: (payload) => {
-        if (cancelled || !payload?.epc) return;
-        const etapa = String(payload.etapa || '').toUpperCase();
-        if (etapa && etapa !== 'SORTING') return;
-        const scan = lecturaToPrepack(payload);
-        scanTimesRef.current.push(Date.now());
-        setTotalScanned((p) => p + 1);
-        setCurrent(scan);
-        setSelected(scan);
-        setHistory((prev) => [scan, ...prev].slice(0, 20));
-      },
-    }).then((s) => { socket = s; }).catch(() => setConnected(false));
+    const API_URL = import.meta.env.VITE_API_URL || '';
+
+    if (!API_URL) {
+      setLiveStatus('demo');
+      return undefined;
+    }
+
+    (async () => {
+      try {
+        const { io } = await import('socket.io-client');
+        if (cancelled) return;
+
+        socket = io(API_URL, {
+          transports: ['websocket', 'polling'],
+          reconnectionDelay: 800,
+          reconnectionDelayMax: 2500,
+        });
+
+        socket.on('connect', () => setLiveStatus('live'));
+        socket.on('disconnect', () => setLiveStatus('connecting'));
+        socket.on('connect_error', () => setLiveStatus('connecting'));
+
+        socket.on('sorter-scan', (payload) => {
+          const prepack = normalizeSorterScan(payload);
+          if (prepack) processScan(prepack);
+        });
+      } catch {
+        if (!cancelled) setLiveStatus('demo');
+      }
+    })();
+
     return () => {
       cancelled = true;
-      if (socket) socket.disconnect();
+      socket?.disconnect();
     };
-  }, []);
+  }, [processScan]);
+
+  const handleScan = useCallback(() => {
+    if (scanning) return;
+    setScanning(true);
+    const next = DEMO_PREPACKS[cursor % DEMO_PREPACKS.length];
+    processScan(next);
+    setCursor((c) => c + 1);
+    setTimeout(() => setScanning(false), 300);
+  }, [scanning, cursor, processScan]);
 
   const bayColor = current
     ? BAY_COLORS[current.bayNumber] || '#6b7280'
@@ -119,9 +155,21 @@ export function SorterScreen() {
           </Metric>
 
           <div className="flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-flow-ring animate-[blink_1.5s_ease-in-out_infinite]" />
-            <span className="font-mono text-[10px] uppercase tracking-industrial text-flow dark:text-flow-ring">
-              {connected ? 'Activo' : 'Conectando'}
+            <span
+              className={
+                'w-1.5 h-1.5 rounded-full animate-[blink_1.5s_ease-in-out_infinite] ' +
+                (liveStatus === 'live' ? 'bg-flow-ring' : 'bg-attention')
+              }
+            />
+            <span
+              className={
+                'font-mono text-[10px] uppercase tracking-industrial ' +
+                (liveStatus === 'live'
+                  ? 'text-flow dark:text-flow-ring'
+                  : 'text-attention dark:text-attention-ring')
+              }
+            >
+              {liveStatus === 'live' ? 'En vivo' : liveStatus === 'demo' ? 'Demo' : 'Conectando'}
             </span>
           </div>
         </div>
@@ -170,6 +218,77 @@ export function SorterScreen() {
     </div>
   );
 }
+
+function normalizeSorterScan(payload) {
+  if (!payload) return null;
+
+  const prepack = payload.prepack || payload.sorterPrepack || {};
+  const tag = prepack.tag || payload.tag || {};
+  const tienda = prepack.tienda || tag.tienda || tag.Tienda || null;
+  const etapa = String(payload.etapa || payload.lectura?.etapa || '').toUpperCase();
+
+  if (etapa && etapa !== 'SORTING') return null;
+
+  const epc = prepack.epc || tag.epc || payload.epc;
+  if (!epc) return null;
+
+  const correctBay = parseBayNumber(
+    prepack.correctBay ||
+      prepack.correct_bay ||
+      tag.correctBay ||
+      tag.correct_bay ||
+      tienda?.bahia_asignada
+  );
+  const actualBay = parseBayNumber(
+    prepack.bayNumber ||
+      prepack.bahiaActual ||
+      prepack.bahia_actual ||
+      payload.bahia ||
+      payload.lectura?.bahia
+  );
+  const bayNumber = actualBay || correctBay || 0;
+
+  return {
+    epc,
+    scanId: payload.lectura_id || payload.id || `${epc}-${payload.timestamp || Date.now()}`,
+    orden_id: prepack.orden_id || tag.orden_id || tag.pedido_id || '—',
+    producto: prepack.producto || tag.producto || tag.sku || 'Prepack sin detalle',
+    proveedor: prepack.proveedor || tag.proveedor?.nombre || tag.Proveedor?.nombre || '—',
+    tienda,
+    bayNumber,
+    correctBay: correctBay || bayNumber,
+    cajaDestino: prepack.cajaDestino || null,
+    isMisrouted: Boolean(actualBay && correctBay && actualBay !== correctBay),
+    prendas: normalizePrendas(prepack.prendas, tag),
+    colores: tag.color ? [tag.color] : [],
+    tallas: tag.talla ? [tag.talla] : [],
+    total_prendas: Number(tag.cantidad_piezas) || 1,
+    color: tag.color || '—',
+    talla: tag.talla || '—',
+    qa_fallido: Boolean(prepack.qa_fallido || tag.qa_fallido),
+    tipo_flujo: prepack.tipo_flujo || tag.tipo_flujo || 'CROSS_DOCK',
+  };
+}
+
+function parseBayNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return null;
+  const match = value.match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function normalizePrendas(prendas, tag) {
+  if (Array.isArray(prendas) && prendas.length > 0) return prendas;
+  const count = Math.max(1, Number(tag?.cantidad_piezas) || 1);
+  return Array.from({ length: count }, () => ({
+    color: tag?.color || '—',
+    talla: tag?.talla || '—',
+  }));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// HEADER METRIC
+// ══════════════════════════════════════════════════════════════════
 
 function Metric({ icon, colorCls, children }) {
   return (
