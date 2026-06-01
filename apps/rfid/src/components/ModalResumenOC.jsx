@@ -4,7 +4,7 @@ import {
   ETAPA_LABELS,
   getColorCSS,
   esColorClaro,
-} from '../data/demoOCs.js';
+} from '../data/etapas.js';
 import { formatHora, formatDur, durMinutes } from '../utils/format.js';
 
 const ETAPAS_ORDEN = ['PREREGISTRO', 'QA', 'REGISTRO', 'SORTER', 'BAHIA', 'AUDITORIA', 'ENVIO'];

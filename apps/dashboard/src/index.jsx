@@ -39,7 +39,7 @@ export function DashboardModule() {
     refresh();
   });
   const { modalOpen, modalKey, closeModal } = useModal();
-  const loading = useDashboardStore((state) => state.loading);
+  const refreshing = useDashboardStore((state) => state.refreshing);
   const drawerOpen = useDashboardStore((state) => state.drawerOpen);
   const closeDrawer = useDashboardStore((state) => state.closeDrawer);
   const ModalComponent = modalKey ? stageModals[modalKey] : null;
@@ -53,7 +53,7 @@ export function DashboardModule() {
       user={{ name: session.user.nombre, role: 'Gerente Operativo' }}
       onLogout={signOut}
     >
-      <Topbar onRefresh={refresh} refreshing={loading} />
+      <Topbar onRefresh={refresh} refreshing={refreshing} />
       <Subbar />
       <Routes>
         <Route path="/" element={<Overview />} />
@@ -69,11 +69,7 @@ export function DashboardModule() {
             <Suspense fallback={<Skeleton height={220} />}>
               <ModalComponent />
             </Suspense>
-            <ModalFooter etapa={modalKey}>
-              <Suspense fallback={<Skeleton height={180} />}>
-                <ModalComponent />
-              </Suspense>
-            </ModalFooter>
+            <ModalFooter etapa={modalKey} />
           </>
         )}
       </ModalOverlay>

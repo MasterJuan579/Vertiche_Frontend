@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useAuth } from '@vertiche/design-system';
 import { OperatorBar } from '../components/OperatorBar.jsx';
 import { NivelBadge } from '../components/NivelBadge.jsx';
 import { Stars } from '../components/Stars.jsx';
+import { crearInspeccion, fetchPendientes } from '../api/proveedores.js';
 import {
   CARGO_SCENARIOS,
   PRODUCT_CATALOG,
@@ -13,6 +15,12 @@ import {
   calcSampleSize,
   sampleHint,
 } from '../data/demoData.js';
+
+// Mapea la decisión interna de la UI al enum que espera el backend.
+const RESULTADO_BACKEND = {
+  reject: 'RECHAZADO',
+  pass:   'OBSERVADO',
+};
 
 /**
  * QA inspector's main screen. Cycles through CARGO_SCENARIOS to simulate
@@ -41,15 +49,37 @@ const STEP_DOT_CLS = {
 };
 
 export function OperatorScreen() {
+  const { session } = useAuth();
   const [review, setReview]         = useState(null);
   const [siniestros, setSiniestros] = useState([]);
-  const [reviewRating, setReviewRating] = useState(null);
   const [sinStep, setSinStep]       = useState(SINIESTRO_IDLE);
-  const [sinDraft, setSinDraft]     = useState({ type: null, notes: '', otherText: '', ppk: null });
+  const [sinDraft, setSinDraft]     = useState({ types: [], notes: '', otherText: '', ppk: null });
   const [rfidInput, setRfidInput]   = useState('');
   const [rfidOk, setRfidOk]         = useState(false);
   const [cycleIdx, setCycleIdx]     = useState(0);
   const [cycleNum, setCycleNum]     = useState(1);
+
+  // Pendientes por proveedor (cuánto le falta a cada uno hoy).
+  // Cuando se conecte la lógica de decremento, este array se actualizará tras
+  // cada inspección registrada.
+  const [pendientes, setPendientes] = useState([]);
+  const [pendientesLoading, setPendientesLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPendientes()
+      .then((data) => {
+        if (!cancelled) {
+          setPendientes(Array.isArray(data) ? data : []);
+          setPendientesLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Error al cargar pendientes:', err);
+        if (!cancelled) setPendientesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const startReview = () => {
     const scenario = CARGO_SCENARIOS[cycleIdx % CARGO_SCENARIOS.length];
@@ -62,16 +92,14 @@ export function OperatorScreen() {
       sampleSize: calcSampleSize(supplier.stars, scenario.qty),
     });
     setSiniestros([]);
-    setReviewRating(null);
     setSinStep(SINIESTRO_IDLE);
-    setSinDraft({ type: null, notes: '', otherText: '', ppk: null });
+    setSinDraft({ types: [], notes: '', otherText: '', ppk: null });
     setRfidInput('');
     setRfidOk(false);
     setCycleIdx((i) => i + 1);
   };
 
   const finishReview = () => {
-    if (!review || reviewRating === null) return;
     // In production: POST each siniestro, PUT updated rating.
     // For mock-only: just clear state and bump the cycle counter.
     setReview(null);
@@ -79,13 +107,18 @@ export function OperatorScreen() {
   };
 
   const startSiniestro = () => {
-    setSinDraft({ type: null, notes: '', otherText: '', ppk: null });
+    setSinDraft({ types: [], notes: '', otherText: '', ppk: null });
     setRfidInput('');
     setRfidOk(false);
     setSinStep(SINIESTRO_TYPE);
   };
-  const selectType = (cat) => setSinDraft((d) => ({ ...d, type: cat }));
-  const goToRfid = () => { if (sinDraft.type) setSinStep(SINIESTRO_RFID); };
+  const toggleType = (cat) => setSinDraft((d) => {
+    const types = d.types.includes(cat)
+      ? d.types.filter((t) => t !== cat)
+      : [...d.types, cat];
+    return { ...d, types };
+  });
+  const goToRfid = () => { if (sinDraft.types.length > 0) setSinStep(SINIESTRO_RFID); };
   const simulateRfid = () => {
     const epc = MOCK_EPCS[siniestros.length % MOCK_EPCS.length];
     setRfidInput(epc);
@@ -94,13 +127,42 @@ export function OperatorScreen() {
   };
   const goToDecide = () => { if (rfidOk) setSinStep(SINIESTRO_DECIDE); };
   const finalizeSiniestro = (decision) => {
-    const type = sinDraft.type === 'Otro (especificar)' && sinDraft.otherText
-      ? sinDraft.otherText
-      : sinDraft.type;
+    // Si hay múltiples defectos, algunos pueden ser "Otro (especificar)"
+    // pero por simplicidad, enviamos el otherText si existe
+    const types = sinDraft.types.map((t) => 
+      t === 'Otro (especificar)' && sinDraft.otherText ? sinDraft.otherText : t
+    );
+
+    // Payload para el backend. Ahora defecto_tipo es un array
+    const payload = {
+      tag_epc:      sinDraft.ppk,
+      proveedor_id: review.supplier.id,
+      operador_id:  session?.user?.sub,
+      resultado:    RESULTADO_BACKEND[decision],
+      defecto_tipos: types, // Cambiado a array
+      observacion:  sinDraft.notes,
+      fecha:        new Date().toISOString(),
+    };
+
+    // Agregamos el siniestro a la lista con estado "enviando"
+    const localId = Date.now();
     setSiniestros((prev) => [
       ...prev,
-      { id: Date.now(), type, notes: sinDraft.notes, ppk: sinDraft.ppk, decision },
+      { id: localId, types, notes: sinDraft.notes, ppk: sinDraft.ppk, decision, sendStatus: 'sending' },
     ]);
+    crearInspeccion(payload)
+      .then(() => {
+        setSiniestros((prev) => prev.map((s) =>
+          s.id === localId ? { ...s, sendStatus: 'sent' } : s
+        ));
+      })
+      .catch((err) => {
+        console.error('Error al registrar inspección:', err);
+        setSiniestros((prev) => prev.map((s) =>
+          s.id === localId ? { ...s, sendStatus: 'error', sendError: err.message } : s
+        ));
+      });
+
     setSinStep(SINIESTRO_IDLE);
   };
   const cancelSiniestro = () => setSinStep(SINIESTRO_IDLE);
@@ -112,6 +174,8 @@ export function OperatorScreen() {
     return (
       <div className="px-8 py-5 max-w-[1400px] mx-auto">
         <OperatorBar counterLabel="Revisión" counterValue={cycleNum} />
+
+        <PendientesPanel loading={pendientesLoading} pendientes={pendientes} />
 
         <div className={
           'p-10 text-center rounded-card border border-ink-100 shadow-card ' +
@@ -152,7 +216,6 @@ export function OperatorScreen() {
   const { supplier, profile, scenario } = review;
   const rejected = siniestros.filter((s) => s.decision === 'reject').length;
   const observed = siniestros.filter((s) => s.decision === 'pass').length;
-  const canFinish = reviewRating !== null;
 
   return (
     <div className="px-8 py-5 max-w-[1400px] mx-auto">
@@ -308,7 +371,7 @@ export function OperatorScreen() {
               <SiniestroType
                 sinDraft={sinDraft}
                 setSinDraft={setSinDraft}
-                onSelect={selectType}
+                onSelect={toggleType}
                 onBack={cancelSiniestro}
                 onNext={goToRfid}
               />
@@ -335,56 +398,18 @@ export function OperatorScreen() {
             )}
           </SectionCard>
         </div>
-
-        {/* ───── SECCIÓN 4 — Calificación final (full width) ───── */}
-        <div className="col-span-2">
-          <SectionCard step="4" label="Calificación final" dot="blue">
-            <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-              <div>
-                <p className="text-[12px] text-ink-500 dark:text-ink-300 mb-2">
-                  Asigna la nota final del proveedor basado en la revisión que acabas de realizar.
-                  Si encontraste defectos, selecciona la calificación que refleje la experiencia real.
-                </p>
-                <div className="flex items-center gap-2">
-                  <Stars
-                    rating={reviewRating || 0}
-                    size={20}
-                    interactive
-                    onChange={(value) => setReviewRating(value)}
-                  />
-                  <span className="text-sm font-semibold text-ink-700 dark:text-ink-100">
-                    {reviewRating ? `${reviewRating} de 5` : 'Sin calificación'}
-                  </span>
-                </div>
-              </div>
-              <div className="rounded-card border border-ink-100 bg-ink-50 p-3 text-[12px] text-ink-500 dark:border-ink-600 dark:bg-ink-600 dark:text-ink-300">
-                {siniestros.length === 0 ? (
-                  <p>No se registraron defectos en la muestra. Elige manualmente la calificación.</p>
-                ) : (
-                  <p>
-                    Se detectaron {siniestros.length} defectos. Selecciona la calificación que mejor
-                    represente la calidad del proveedor en esta revisión.
-                  </p>
-                )}
-              </div>
-            </div>
-          </SectionCard>
-        </div>
       </div>
 
       {/* ───── Footer — finish review ───── */}
       <div className="flex items-center justify-between gap-5 px-4 py-3.5 bg-white border border-ink-100 rounded-card shadow-card dark:bg-ink-700 dark:border-ink-600">
         <p className="flex-1 text-xs text-ink-500 dark:text-ink-300">
-          Cuando termines la inspección de la muestra, cierra la revisión para liberar la carga y actualizar la calificación del proveedor.
+          Cuando termines la inspección de la muestra, cierra la revisión para liberar la carga.
         </p>
         <button
           onClick={finishReview}
-          disabled={!canFinish}
           className={
             'shrink-0 px-6 py-3 rounded-card font-display text-sm font-semibold transition-colors ' +
-            (canFinish
-              ? 'text-white bg-flow hover:bg-green-700'
-              : 'text-ink-400 bg-ink-100 cursor-not-allowed dark:bg-ink-600 dark:text-ink-500')
+            'text-white bg-flow hover:bg-green-700'
           }
         >
           Terminar revisión →
@@ -463,18 +488,26 @@ function SiniestroIdle({ siniestros, onStart }) {
                 <span className="text-lg">{isReject ? '❌' : '⚠️'}</span>
                 <div className="flex-1 min-w-0">
                   <div className="font-mono text-xs font-semibold text-ink-700 dark:text-ink-100 truncate">
-                    {s.ppk} · {s.type}
+                    {s.ppk}
                   </div>
-                  <div className="text-[11px] text-ink-400 mt-0.5 truncate">
+                  <div className="flex flex-wrap gap-1 mt-1 mb-1">
+                    {s.types.map((type, i) => (
+                      <span key={i} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-anomaly/20 text-anomaly dark:bg-anomaly/30 dark:text-anomaly-ring font-semibold">
+                        {type}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-ink-400">
                     {s.notes || 'Sin notas adicionales'}
                   </div>
                 </div>
                 <span className={
-                  'text-[10px] font-display font-semibold px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
+                  'text-[10px] font-display font-semibold px-2 py-0.5 rounded-md border uppercase tracking-wide shrink-0 ' +
                   pillCls
                 }>
                   {isReject ? 'Rechazado' : 'Pasó c/ obs'}
                 </span>
+                <SendStatus status={s.sendStatus} error={s.sendError} />
               </div>
             );
           })}
@@ -484,14 +517,64 @@ function SiniestroIdle({ siniestros, onStart }) {
   );
 }
 
+function SendStatus({ status, error }) {
+  if (status === 'sending') {
+    return (
+      <span
+        title="Enviando al servidor…"
+        className={
+          'inline-flex items-center gap-1 text-[10px] font-display font-semibold ' +
+          'px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
+          'bg-blue-50 text-rfid border-rfid/40 ' +
+          'dark:bg-rfid/20 dark:text-blue-300 dark:border-rfid/50'
+        }
+      >
+        <span className="w-2 h-2 rounded-full bg-rfid animate-pulse" />
+        Enviando
+      </span>
+    );
+  }
+  if (status === 'sent') {
+    return (
+      <span
+        title="Registrado en el backend"
+        className={
+          'inline-flex items-center gap-1 text-[10px] font-display font-semibold ' +
+          'px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
+          'bg-flow-bg text-flow border-flow-ring/40 ' +
+          'dark:bg-flow/20 dark:text-flow-ring dark:border-flow-ring/50'
+        }
+      >
+        ✓ Guardado
+      </span>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <span
+        title={error || 'No se pudo registrar'}
+        className={
+          'inline-flex items-center gap-1 text-[10px] font-display font-semibold ' +
+          'px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
+          'bg-anomaly-bg text-anomaly border-anomaly-ring/40 ' +
+          'dark:bg-anomaly/20 dark:text-anomaly-ring dark:border-anomaly-ring/50'
+        }
+      >
+        ✕ Error
+      </span>
+    );
+  }
+  return null;
+}
+
 function SiniestroType({ sinDraft, setSinDraft, onSelect, onBack, onNext }) {
   return (
     <div className="animate-[fadeIn_.25s_ease]">
-      <StepHeader onBack={onBack} text="Paso 1 de 3 · Tipo de defecto" />
+      <StepHeader onBack={onBack} text="Paso 1 de 3 · Tipos de defecto" />
 
       <div className="grid grid-cols-4 gap-2 mb-3">
         {DEFECT_TYPES.map((d) => {
-          const selected = sinDraft.type === d.cat;
+          const selected = sinDraft.types.includes(d.cat);
           return (
             <button
               key={d.cat}
@@ -511,7 +594,7 @@ function SiniestroType({ sinDraft, setSinDraft, onSelect, onBack, onNext }) {
         })}
       </div>
 
-      {sinDraft.type === 'Otro (especificar)' && (
+      {sinDraft.types.includes('Otro (especificar)') && (
         <div className="mb-3 animate-[fadeIn_.25s_ease]">
           <label className="block text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-1">
             Describe el problema
@@ -551,10 +634,10 @@ function SiniestroType({ sinDraft, setSinDraft, onSelect, onBack, onNext }) {
 
       <button
         onClick={onNext}
-        disabled={!sinDraft.type}
+        disabled={sinDraft.types.length === 0}
         className={
           'w-full px-3 py-3 rounded-card font-display text-[13px] font-semibold transition-colors ' +
-          (sinDraft.type
+          (sinDraft.types.length > 0
             ? 'bg-rfid text-white hover:bg-blue-700 cursor-pointer'
             : 'bg-ink-100 text-ink-400 cursor-not-allowed dark:bg-ink-600 dark:text-ink-400')
         }
@@ -581,7 +664,7 @@ function SiniestroRfid({ sinDraft, rfidInput, setRfidInput, rfidOk, onBack, onSi
         </div>
         <div className="text-xs text-ink-500 dark:text-ink-300 mb-4">
           Acerca el lector RFID al prepack que presenta:{' '}
-          <span className="font-mono text-anomaly dark:text-anomaly-ring">{sinDraft.type}</span>
+          <span className="font-mono text-anomaly dark:text-anomaly-ring">{sinDraft.types.join(', ')}</span>
         </div>
         <div className="max-w-[340px] mx-auto">
           <input
@@ -637,29 +720,20 @@ function SiniestroDecide({ sinDraft, onBack, onFinalize }) {
       <StepHeader onBack={onBack} text="Paso 3 de 3 · Decisión final" />
 
       <div className="px-3.5 py-3 mb-3 rounded-card bg-ink-50 border border-ink-100 dark:bg-ink-600 dark:border-ink-500">
-        {[
-          { label: 'Prepack', value: sinDraft.ppk,  mono: true },
-          { label: 'Defecto', value: sinDraft.type, mono: false },
-        ].map((r, i, arr) => {
-          const isLast = i === arr.length - 1;
-          return (
-            <div
-              key={r.label}
-              className={
-                'flex justify-between py-1.5 text-xs ' +
-                (isLast ? '' : 'border-b border-ink-100 dark:border-ink-500')
-              }
-            >
-              <span className="text-ink-400">{r.label}</span>
-              <span className={
-                'font-medium text-ink-700 dark:text-ink-100 ' +
-                (r.mono ? 'font-mono' : 'font-body')
-              }>
-                {r.value}
+        <div className="flex justify-between py-1.5 text-xs border-b border-ink-100 dark:border-ink-500">
+          <span className="text-ink-400">Prepack</span>
+          <span className="font-mono font-medium text-ink-700 dark:text-ink-100">{sinDraft.ppk}</span>
+        </div>
+        <div className="py-1.5 text-xs">
+          <span className="text-ink-400">Defectos</span>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {sinDraft.types.map((type, i) => (
+              <span key={i} className="inline-flex items-center px-2 py-1 text-[11px] font-semibold bg-anomaly-bg text-anomaly rounded-md border border-anomaly-ring dark:bg-anomaly/20 dark:text-anomaly-ring dark:border-anomaly-ring">
+                {type}
               </span>
-            </div>
-          );
-        })}
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2.5">
@@ -713,6 +787,75 @@ function StepHeader({ onBack, text }) {
       <span className="text-[13px] font-display font-semibold text-ink-700 dark:text-ink-100">
         {text}
       </span>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PendientesPanel — muestra cuántas revisiones le quedan a cada proveedor
+// ════════════════════════════════════════════════════════════════════
+
+function PendientesPanel({ loading, pendientes }) {
+  return (
+    <div className="mb-4 bg-white border border-ink-100 rounded-card p-4 shadow-card dark:bg-ink-700 dark:border-ink-600">
+      <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-3">
+        Revisiones pendientes por proveedor · Turno actual
+      </div>
+
+      {loading && (
+        <div className="text-center py-3 text-xs text-ink-400">Cargando pendientes…</div>
+      )}
+
+      {!loading && pendientes.length === 0 && (
+        <div className="text-center py-3 text-xs text-ink-400">
+          No hay revisiones pendientes hoy.
+        </div>
+      )}
+
+      {!loading && pendientes.map((p, idx) => {
+        const isLast = idx === pendientes.length - 1;
+        const countCls =
+          p.restantes === 0
+            ? 'bg-flow-bg text-flow border-flow-ring/40 dark:bg-flow/20 dark:text-flow-ring dark:border-flow-ring/40'
+            : p.restantes > 5
+            ? 'bg-anomaly-bg text-anomaly border-anomaly-ring/40 dark:bg-anomaly/20 dark:text-anomaly-ring dark:border-anomaly-ring/40'
+            : 'bg-attention-bg text-attention border-attention-ring/40 dark:bg-attention/20 dark:text-attention-ring dark:border-attention-ring/40';
+        return (
+          <div
+            key={p.proveedor_id}
+            className={
+              'flex items-center justify-between gap-3 py-2.5 ' +
+              (isLast ? '' : 'border-b border-ink-100 dark:border-ink-600')
+            }
+          >
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-medium text-ink-700 dark:text-ink-100 truncate">
+                {p.nombre}
+              </div>
+              <div className="text-[11px] text-ink-400 mt-0.5">
+                {p.inspeccionados_hoy} de {p.cuota} inspeccionados · {p.codigo}
+              </div>
+            </div>
+
+            {p.level && p.color && (
+              <NivelBadge level={p.level} color={p.color} />
+            )}
+
+            <div className="text-right shrink-0 min-w-[110px]">
+              <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-0.5">
+                Pendientes
+              </div>
+              <span className={
+                'inline-flex items-center justify-center px-2.5 py-0.5 rounded-md border ' +
+                'font-mono text-base font-semibold ' +
+                countCls
+              }>
+                {p.restantes}
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

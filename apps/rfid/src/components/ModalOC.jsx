@@ -4,7 +4,7 @@ import {
   ETAPA_LABELS,
   getColorCSS,
   esColorClaro,
-} from '../data/demoOCs.js';
+} from '../data/etapas.js';
 import { formatHora, formatDur, durMinutes } from '../utils/format.js';
 import { consolidarHistorial } from '../utils/historial.js';
 import { buildTablaPrepack } from '../utils/sizeTable.js';

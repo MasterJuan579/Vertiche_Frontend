@@ -72,7 +72,7 @@ export function PrepackDetailPanel({ prepack }) {
             {prepack.orden_id}
           </span>
           <span className="text-[11px] text-ink-500 dark:text-ink-300 truncate">
-            {prepack.producto}
+            {prepack.producto || prepack.sku || '—'}
           </span>
         </div>
         <div className="text-[10px] text-ink-400 mt-0.5">
