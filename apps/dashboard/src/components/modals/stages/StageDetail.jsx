@@ -27,7 +27,7 @@ function useDashboardSnapshot() {
   }));
 }
 
-export function StageDetail({ stageKey }) {
+export function StageDetailContent({ stageKey }) {
   const data = useDashboardSnapshot();
   const stage = STAGE_BY_KEY[stageKey];
   const items = getStageItems(stageKey, data);
@@ -36,7 +36,7 @@ export function StageDetail({ stageKey }) {
   const operators = getOperators(data.inspecciones);
 
   return (
-    <div className="max-h-[58vh] overflow-y-auto p-[18px]">
+    <>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
         <div className="bg-ink-50 dark:bg-ink-600 border border-ink-100 dark:border-ink-600 rounded-card p-3">
           <span className="text-ink-400 dark:text-ink-300 text-[11px] block">Total etapa</span>
@@ -78,6 +78,14 @@ export function StageDetail({ stageKey }) {
           <div className="bg-ink-50 dark:bg-ink-600 border border-ink-100 dark:border-ink-600 rounded-card p-3 text-ink-300 dark:text-ink-400 text-center">--</div>
         )}
       </div>
+    </>
+  );
+}
+
+export function StageDetail({ stageKey }) {
+  return (
+    <div className="max-h-[58vh] overflow-y-auto p-[18px]">
+      <StageDetailContent stageKey={stageKey} />
     </div>
   );
 }
