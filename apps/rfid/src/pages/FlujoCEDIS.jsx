@@ -174,9 +174,11 @@ export function FlujoCEDIS() {
           </div>
           <button
             onClick={cargarDatos}
-            className="text-[10px] px-2 py-1 rounded bg-ink-50 hover:bg-ink-100 dark:bg-ink-600 dark:hover:bg-ink-500"
+            className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-md bg-white border border-ink-100 text-ink-500 hover:bg-ink-50 hover:text-ink-700 dark:bg-ink-700 dark:border-ink-500 dark:text-ink-300 dark:hover:bg-ink-600 dark:hover:text-ink-100 transition-colors"
+            title="Recargar datos del backend"
           >
-            🔄 Actualizar
+            <RefreshIcon />
+            Actualizar
           </button>
         </div>
 
@@ -893,5 +895,23 @@ function Panel({ children }) {
     }>
       {children}
     </div>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-6.74-3.05M3 12a9 9 0 0 1 15.74-6.05M21 3v6h-6M3 21v-6h6" />
+    </svg>
   );
 }

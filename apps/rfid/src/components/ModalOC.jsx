@@ -357,12 +357,34 @@ const METRICAS_POR_ETAPA = {
   ],
 };
 
+// Mismo mapa que FlujoCEDIS: hasta qué índice de etapa visual ha llegado
+// cada estado del prepack. EN_CAJA=4 implica que pasó por 0,1,2,3,4.
+const ETAPA_DB_A_INDICE_MAX = {
+  REGISTRADO: 0,
+  EN_QA:      1,
+  RECHAZADO:  1,
+  APROBADO:   2,
+  EN_CAJA:    4,
+  ENVIADO:    6,
+};
+const ETAPAS_ORDEN_GANTT = ['PREREGISTRO', 'QA', 'REGISTRO', 'SORTER', 'BAHIA', 'AUDITORIA', 'ENVIO'];
+
 function OrigenMetrics({ etapaOrigen, tags, totalEsperados }) {
   const c = ETAPA_COLORS[etapaOrigen] || '#6366F1';
-  const te = tags.filter((t) => t.etapa_actual === etapaOrigen);
-  const n = te.length;
+
+  // ACUMULATIVO: cuántos prepacks ya pasaron por esta etapa o más adelante.
+  const idxEtapa = ETAPAS_ORDEN_GANTT.indexOf(etapaOrigen);
+  const llegados = tags.filter((t) => {
+    const idxMax = ETAPA_DB_A_INDICE_MAX[t.etapa_actual];
+    return idxMax != null && idxMax >= idxEtapa;
+  });
+
+  // Tags AHORA específicamente en esta etapa (para métricas de "en sitio").
+  const enSitio = tags.filter((t) => t.etapa_actual === etapaOrigen);
+
+  const n = llegados.length;
   const tot = tags.length;
-  const err = te.filter((t) => t.qa_fallido).length;
+  const err = enSitio.filter((t) => t.qa_fallido).length;
   const ok = n - err;
   const pct = tot > 0 ? Math.round((n / tot) * 100) : 0;
   const pctOk = n > 0 ? Math.round((ok / n) * 100) : 100;
