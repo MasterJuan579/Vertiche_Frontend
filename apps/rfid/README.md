@@ -44,10 +44,18 @@ Vivien dentro de `Vinculacion.jsx` y `Trazabilidad.jsx` por proximidad de uso. S
 
 ## Configuración
 
-Crear `.env` en la **raíz del monorepo** (`Vertiche_Frontend/.env`):
+Crear `.env` en `apps/web/`:
 ```
-VITE_API_BASE_URL=http://localhost:8080
+VITE_API_URL=http://localhost:8080
 ```
+
+> **Nota**: usamos `VITE_API_URL` (la misma variable que el resto del monorepo). Por compatibilidad con setups anteriores, el módulo también acepta `VITE_API_BASE_URL` como alias, pero `VITE_API_URL` tiene prioridad.
+
+En **Vercel** (deploy de prod/staging) la variable debe apuntar a la API Gateway:
+```
+VITE_API_URL=https://ev4km5col1.execute-api.us-east-1.amazonaws.com
+```
+porque Vercel sirve por HTTPS y el EC2 directo (HTTP) sería bloqueado por *mixed content* del navegador.
 
 ## Cómo correrlo
 
