@@ -4,8 +4,13 @@ import { AlertItem } from './AlertItem';
 export function AlertsDrawer({ isOpen, onClose }) {
   const alerts = useAlerts();
 
+  if (!isOpen) return null;
+
   return (
-    <aside className={`fixed top-0 right-0 bottom-0 w-[calc(100vw-32px)] max-w-[420px] bg-white dark:bg-ink-700 border-l border-ink-100 dark:border-ink-600 shadow-[-10px_0_30px_rgba(0,0,0,0.12)] dark:shadow-[-10px_0_30px_rgba(0,0,0,0.4)] z-60 transform transition-transform duration-200 ease-out ${isOpen ? 'translate-x-0' : 'translate-x-[105%]'}`} aria-hidden={!isOpen}>
+    <aside
+      className="fixed top-0 right-0 bottom-0 w-[calc(100vw-32px)] max-w-[420px] bg-white dark:bg-ink-700 border-l border-ink-100 dark:border-ink-600 shadow-[-10px_0_30px_rgba(0,0,0,0.12)] dark:shadow-[-10px_0_30px_rgba(0,0,0,0.4)] z-60"
+      aria-label="Alertas activas"
+    >
       <div className="flex items-center justify-between border-b border-ink-100 dark:border-ink-600 p-[18px]">
         <div>
           <span className="text-ink-400 dark:text-ink-300 text-[11px] font-extrabold tracking-industrial uppercase block">Alertas</span>

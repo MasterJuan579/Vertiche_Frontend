@@ -44,10 +44,11 @@ Vivien dentro de `Vinculacion.jsx` y `Trazabilidad.jsx` por proximidad de uso. S
 
 ## Configuración
 
-Crear `.env` en la **raíz del monorepo** (`Vertiche_Frontend/.env`):
-```
-VITE_API_BASE_URL=http://localhost:8080
-```
+Crear `.env` en `apps/web/` con la variable del backend (mismo nombre que el resto del monorepo). El valor depende del entorno — solicítalo al admin del proyecto.
+
+> En el deploy de producción la variable debe apuntar a un endpoint **HTTPS**, no al EC2 directo, porque el navegador bloquea *mixed content* (HTTPS → HTTP). El admin del proyecto la configura desde el dashboard del hosting.
+
+Por compatibilidad con setups anteriores, el módulo también acepta una variable alternativa como alias.
 
 ## Cómo correrlo
 

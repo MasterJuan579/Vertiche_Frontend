@@ -16,6 +16,7 @@ const useDashboardStore = create(
       proveedores: [],
 
       loading: true,
+      refreshing: false,
       error: null,
       errors: {},
       lastUpdate: null,
@@ -24,9 +25,17 @@ const useDashboardStore = create(
       modalKey: null,
 
       setData: (data) =>
-        set({ ...data, loading: false, error: null, lastUpdate: new Date() }),
-      setError: (error) => set({ error, loading: false }),
+        set({
+          ...data,
+          loading: false,
+          refreshing: false,
+          error: null,
+          lastUpdate: new Date(),
+        }),
+      setError: (error) =>
+        set({ error, loading: false, refreshing: false }),
       setLoading: (loading) => set({ loading }),
+      setRefreshing: (refreshing) => set({ refreshing }),
 
       openDrawer: () => set({ drawerOpen: true }),
       closeDrawer: () => set({ drawerOpen: false }),

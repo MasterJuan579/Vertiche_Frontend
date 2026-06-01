@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import useDashboardStore from '../stores/dashboardStore';
 import { api, ENDPOINTS } from '../services/api';
 
@@ -9,13 +9,26 @@ export function useDashboardData(refreshInterval = 30000) {
   const setData = useDashboardStore((state) => state.setData);
   const setError = useDashboardStore((state) => state.setError);
   const setLoading = useDashboardStore((state) => state.setLoading);
+  const setRefreshing = useDashboardStore((state) => state.setRefreshing);
+  const requestSeq = useRef(0);
 
-  const loadAllData = useCallback(async () => {
-    setLoading(true);
+  const loadAllData = useCallback(async (initial = false) => {
+    const currentRequest = requestSeq.current + 1;
+    requestSeq.current = currentRequest;
+
+    if (initial) {
+      setLoading(true);
+    } else {
+      setRefreshing(true);
+    }
 
     const results = await Promise.allSettled(
       ENTRIES.map(([, endpoint]) => api.get(endpoint)),
     );
+
+    if (requestSeq.current !== currentRequest) {
+      return;
+    }
 
     const data = {};
     const errors = {};
@@ -40,13 +53,13 @@ export function useDashboardData(refreshInterval = 30000) {
       const first = Object.values(errors)[0];
       setError(first?.message || 'No se pudo cargar ningún dato del servidor');
     }
-  }, [setData, setError, setLoading]);
+  }, [setData, setError, setLoading, setRefreshing]);
 
   useEffect(() => {
-    loadAllData();
+    loadAllData(true);
     const interval = setInterval(loadAllData, refreshInterval);
     return () => clearInterval(interval);
   }, [loadAllData, refreshInterval]);
 
-  return { refresh: loadAllData };
+  return { refresh: () => loadAllData(false) };
 }

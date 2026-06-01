@@ -1,8 +1,9 @@
 import { memo } from 'react';
 import { usePDF } from '../../hooks/usePDF';
+import { StageDetailContent } from './stages/StageDetail';
 import '../../styles/pdf-print.css';
 
-const ReportePDF = memo(function ReportePDF({ etapa, children }) {
+const ReportePDF = memo(function ReportePDF({ etapa }) {
   const { contentRef, exportarPDF, generating, error } = usePDF();
 
   return (
@@ -18,7 +19,9 @@ const ReportePDF = memo(function ReportePDF({ etapa, children }) {
             })}
           </p>
         </div>
-        <div className="my-5">{children}</div>
+        <div className="my-5">
+          <StageDetailContent stageKey={etapa} />
+        </div>
         <div className="border-t border-ink-100 mt-5 pt-2.5 text-center text-ink-400 text-[11px]">
           <p>Generado por Vertiche Dashboard v2.4.0</p>
           <p>CEDI Lerma</p>

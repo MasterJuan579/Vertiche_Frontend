@@ -3,10 +3,18 @@ import useDashboardStore from '../../stores/dashboardStore';
 import { formatDateTime } from '../../utils/formatters';
 
 export function Topbar({ onRefresh, refreshing }) {
+  const loading = useDashboardStore((state) => state.loading);
   const lastUpdate = useDashboardStore((state) => state.lastUpdate);
   const error = useDashboardStore((state) => state.error);
   const openDrawer = useDashboardStore((state) => state.openDrawer);
   const alertCount = useDashboardStore((state) => state.getAnomaliasActivas().length);
+  const statusLabel = error
+    ? `Error API: ${error}`
+    : loading && !lastUpdate
+      ? 'Cargando datos...'
+      : refreshing
+      ? 'Sincronizando datos...'
+      : `Actualizado ${formatDateTime(lastUpdate)}`;
 
   return (
     <div className="flex items-center justify-between gap-4 bg-white dark:bg-ink-700 border-b border-ink-100 dark:border-ink-600 px-6 py-[18px]">
@@ -25,7 +33,7 @@ export function Topbar({ onRefresh, refreshing }) {
           }`}
         >
           <span className="rounded-pill h-2 w-2 bg-flow-ring" />
-          {error ? `Error API: ${error}` : `Actualizado ${formatDateTime(lastUpdate)}`}
+          {statusLabel}
         </div>
         <button
           className="relative inline-flex items-center justify-center w-[38px] min-h-[36px] border border-ink-200 dark:border-ink-500 rounded-md font-bold"
