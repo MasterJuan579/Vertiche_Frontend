@@ -46,6 +46,7 @@ function mkPrepack(epc, ocId, ocNombre, proveedor, tienda, prendas, opts = {}) {
     tienda,
     bayNumber: opts.actualBay ?? correctBay,
     correctBay,
+    cajaDestino: opts.cajaDestino ?? null,
     isMisrouted: !!opts.misrouted,
     prendas,
     colores,
@@ -57,6 +58,9 @@ function mkPrepack(epc, ocId, ocNombre, proveedor, tienda, prendas, opts = {}) {
     tipo_flujo: 'CROSS_DOCK',
   };
 }
+
+export const CAJA_COUNT = 3;
+export const DEMO_BAY_ID = 1;
 
 /**
  * Flat list of prepacks the sorter cycles through. Two are flagged misrouted
@@ -101,6 +105,16 @@ export const DEMO_PREPACKS = [
   mkPrepack('E022C', 'OC-022', 'Pantalón Jogger Tech', 'ActiveWear CDMX',              TIENDAS.MEXICALI,    [{ color: 'Verde', talla: 'M' }, { color: 'Negro', talla: 'XL' }, { color: 'Gris', talla: 'M' }]),
 ];
 
+// Mock post-sorter routing: each bay has Caja 1, 2 and 3. Production should
+// return cajaDestino after the RFID arch resolves the EPC inside the bay.
+const cajaCounterByBay = new Map();
+for (const prepack of DEMO_PREPACKS) {
+  if (prepack.cajaDestino) continue;
+  const next = cajaCounterByBay.get(prepack.correctBay) || 0;
+  prepack.cajaDestino = (next % CAJA_COUNT) + 1;
+  cajaCounterByBay.set(prepack.correctBay, next + 1);
+}
+
 // Bay number → accent color. 10 distinct hues that read well at distance.
 export const BAY_COLORS = {
   1:  '#3b82f6', 2:  '#8b5cf6', 3:  '#f59e0b', 4:  '#ec4899', 5:  '#10b981',
@@ -144,4 +158,14 @@ export function getStoresByBay() {
 /** Returns prepacks correctly assigned to the given bay. */
 export function getPrepacksForBay(bayId) {
   return DEMO_PREPACKS.filter((p) => p.correctBay === bayId);
+}
+
+export function getPrepacksForCaja(bayId, cajaId) {
+  return DEMO_PREPACKS.filter(
+    (p) => p.correctBay === bayId && p.cajaDestino === cajaId
+  );
+}
+
+export function getPrepacksForDemoBay() {
+  return DEMO_PREPACKS.filter((p) => p.correctBay === DEMO_BAY_ID);
 }
