@@ -16,6 +16,19 @@ export async function fetchProveedores() {
 }
 
 /**
+ * Lista cuántas revisiones le quedan a cada proveedor en el turno actual.
+ * Cada item: { proveedor_id, nombre, codigo, stars, level, color, origin,
+ *              cuota, inspeccionados_hoy, restantes }
+ */
+export async function fetchPendientes() {
+  const res = await fetch(`${API_URL}/PlanQA/pendientes`);
+  if (!res.ok) {
+    throw new Error(`Error ${res.status} al obtener pendientes`);
+  }
+  return res.json();
+}
+
+/**
  * Registra una inspección QA (un siniestro reportado contra un prepack).
  *
  * Payload esperado:

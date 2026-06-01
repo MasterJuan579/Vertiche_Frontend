@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@vertiche/design-system';
 import { OperatorBar } from '../components/OperatorBar.jsx';
 import { NivelBadge } from '../components/NivelBadge.jsx';
-import { crearInspeccion } from '../api/proveedores.js';
+import { Stars } from '../components/Stars.jsx';
+import { crearInspeccion, fetchPendientes } from '../api/proveedores.js';
 import {
   CARGO_SCENARIOS,
   PRODUCT_CATALOG,
@@ -57,6 +58,28 @@ export function OperatorScreen() {
   const [rfidOk, setRfidOk]         = useState(false);
   const [cycleIdx, setCycleIdx]     = useState(0);
   const [cycleNum, setCycleNum]     = useState(1);
+
+  // Pendientes por proveedor (cuánto le falta a cada uno hoy).
+  // Cuando se conecte la lógica de decremento, este array se actualizará tras
+  // cada inspección registrada.
+  const [pendientes, setPendientes] = useState([]);
+  const [pendientesLoading, setPendientesLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPendientes()
+      .then((data) => {
+        if (!cancelled) {
+          setPendientes(Array.isArray(data) ? data : []);
+          setPendientesLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Error al cargar pendientes:', err);
+        if (!cancelled) setPendientesLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const startReview = () => {
     const scenario = CARGO_SCENARIOS[cycleIdx % CARGO_SCENARIOS.length];
@@ -151,6 +174,8 @@ export function OperatorScreen() {
     return (
       <div className="px-8 py-5 max-w-[1400px] mx-auto">
         <OperatorBar counterLabel="Revisión" counterValue={cycleNum} />
+
+        <PendientesPanel loading={pendientesLoading} pendientes={pendientes} />
 
         <div className={
           'p-10 text-center rounded-card border border-ink-100 shadow-card ' +
@@ -762,6 +787,75 @@ function StepHeader({ onBack, text }) {
       <span className="text-[13px] font-display font-semibold text-ink-700 dark:text-ink-100">
         {text}
       </span>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// PendientesPanel — muestra cuántas revisiones le quedan a cada proveedor
+// ════════════════════════════════════════════════════════════════════
+
+function PendientesPanel({ loading, pendientes }) {
+  return (
+    <div className="mb-4 bg-white border border-ink-100 rounded-card p-4 shadow-card dark:bg-ink-700 dark:border-ink-600">
+      <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-3">
+        Revisiones pendientes por proveedor · Turno actual
+      </div>
+
+      {loading && (
+        <div className="text-center py-3 text-xs text-ink-400">Cargando pendientes…</div>
+      )}
+
+      {!loading && pendientes.length === 0 && (
+        <div className="text-center py-3 text-xs text-ink-400">
+          No hay revisiones pendientes hoy.
+        </div>
+      )}
+
+      {!loading && pendientes.map((p, idx) => {
+        const isLast = idx === pendientes.length - 1;
+        const countCls =
+          p.restantes === 0
+            ? 'bg-flow-bg text-flow border-flow-ring/40 dark:bg-flow/20 dark:text-flow-ring dark:border-flow-ring/40'
+            : p.restantes > 5
+            ? 'bg-anomaly-bg text-anomaly border-anomaly-ring/40 dark:bg-anomaly/20 dark:text-anomaly-ring dark:border-anomaly-ring/40'
+            : 'bg-attention-bg text-attention border-attention-ring/40 dark:bg-attention/20 dark:text-attention-ring dark:border-attention-ring/40';
+        return (
+          <div
+            key={p.proveedor_id}
+            className={
+              'flex items-center justify-between gap-3 py-2.5 ' +
+              (isLast ? '' : 'border-b border-ink-100 dark:border-ink-600')
+            }
+          >
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-medium text-ink-700 dark:text-ink-100 truncate">
+                {p.nombre}
+              </div>
+              <div className="text-[11px] text-ink-400 mt-0.5">
+                {p.inspeccionados_hoy} de {p.cuota} inspeccionados · {p.codigo}
+              </div>
+            </div>
+
+            {p.level && p.color && (
+              <NivelBadge level={p.level} color={p.color} />
+            )}
+
+            <div className="text-right shrink-0 min-w-[110px]">
+              <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-0.5">
+                Pendientes
+              </div>
+              <span className={
+                'inline-flex items-center justify-center px-2.5 py-0.5 rounded-md border ' +
+                'font-mono text-base font-semibold ' +
+                countCls
+              }>
+                {p.restantes}
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
