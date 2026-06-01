@@ -6,7 +6,8 @@
   "main": "./src/index.jsx",
   "dependencies": {
     "@vertiche/design-system": "*",
-    "@vertiche/mock-data": "*"
+    "@vertiche/mock-data": "*",
+    "socket.io-client": "^4.8.3"
   },
   "peerDependencies": {
     "react": "^18.3.1",
