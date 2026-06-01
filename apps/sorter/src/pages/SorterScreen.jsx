@@ -87,7 +87,7 @@ export function SorterScreen() {
         'bg-white dark:bg-ink-700 dark:border-ink-600'
       }>
         <div className="flex-1 font-display text-sm font-semibold text-ink-700 dark:text-ink-100">
-          Sorter — Conveyor Activo
+          Sorter existente - Prepack a Bahia
         </div>
 
         {/* Right cluster: metrics + live indicator */}

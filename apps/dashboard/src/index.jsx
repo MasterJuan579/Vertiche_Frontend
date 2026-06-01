@@ -8,7 +8,7 @@ import { AlertsDrawer } from './components/alerts';
 import { Subbar, Topbar } from './components/layout';
 import { ModalFooter, ModalHeader, ModalOverlay } from './components/modals';
 import { Skeleton } from './components/common';
-import { useDashboardData, useModal } from './hooks';
+import { useDashboardData, useModal, useRealtime } from './hooks';
 import useDashboardStore from './stores/dashboardStore';
 import { STAGE_BY_KEY } from './utils/constants';
 const ACCENT = '#0F766E';
@@ -32,6 +32,12 @@ const stageModals = {
 export function DashboardModule() {
   const { session, signOut } = useAuth();
   const { refresh } = useDashboardData(30000);
+  useRealtime((_type, _payload) => {
+    // Refresca todo el dashboard ante cualquier evento en vivo.
+    // En una iteración futura se puede optimizar para actualizar
+    // solo la colección afectada.
+    refresh();
+  });
   const { modalOpen, modalKey, closeModal } = useModal();
   const loading = useDashboardStore((state) => state.loading);
   const drawerOpen = useDashboardStore((state) => state.drawerOpen);
