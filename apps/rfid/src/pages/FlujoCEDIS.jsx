@@ -527,21 +527,24 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
 
       {ETAPAS_FLUJO.map((etapa, idx) => {
         const llegados = oc.llegadosPorEtapa?.[etapa.id] ?? 0;
-        const total = oc.totalPrepacks || 0;
         const enEtapaActual = oc.tagsPorEtapa[etapa.id] || [];
-        const errEnEtapa = enEtapaActual.some((t) => t.qa_fallido === true);
+        const tienePrep = llegados > 0;
         const enRango = idx >= oc.idxMin && idx <= oc.idxMax;
+        const errEnEtapa = enEtapaActual.some((t) => t.qa_fallido === true);
         const color = ETAPA_COLORS[etapa.id] || '#94A3B8';
+        const datos = tienePrep ? getDatosEtapa(etapa.id, llegados, oc, enEtapaActual) : null;
 
         return (
           <StageCell
             key={etapa.id}
-            llegados={llegados}
-            total={total}
+            tienePrep={tienePrep}
             enRango={enRango}
             errEnEtapa={errEnEtapa}
             color={color}
-            onClick={() => (llegados > 0 || enEtapaActual.length > 0) && onClickSegmento(oc, etapa.id)}
+            datos={datos}
+            llegados={llegados}
+            totalPrepacks={oc.totalPrepacks}
+            onClick={() => tienePrep && onClickSegmento(oc, etapa.id)}
           />
         );
       })}
@@ -549,74 +552,73 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
   );
 }
 
-/**
- * Celda compacta de etapa. Muestra:
- *   - Vacía (sin tags llegados y fuera del rango activo de la OC).
- *   - Pendiente (en rango pero 0 llegados): línea punteada.
- *   - Parcial: "X/Y" + "NN%" con color de la etapa.
- *   - Completa (X == Y): verde sólido con ✓.
- *   - Anomalía: badge rojo encima.
- */
-function StageCell({ llegados, total, enRango, errEnEtapa, color, onClick }) {
-  const tienePrep = llegados > 0;
-  const completo = total > 0 && llegados >= total;
-  const pct = total > 0 ? Math.round((llegados / total) * 100) : 0;
-
+function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, llegados, totalPrepacks, onClick }) {
   if (!tienePrep && !enRango) {
-    return <div className="h-11 m-[3px_2px]" />;
+    return <div className="h-9 m-[3px_2px]" />;
   }
 
   if (!tienePrep && enRango) {
     return (
-      <div className="h-11 m-[3px_2px] rounded-md flex items-center justify-center bg-ink-50/50 border border-dashed border-ink-100 dark:bg-ink-800/30 dark:border-ink-600">
+      <div className="h-9 m-[3px_2px] rounded-md flex items-center justify-center bg-ink-50/50 border border-dashed border-ink-100 dark:bg-ink-800/30 dark:border-ink-600">
         <div className="w-5 h-0.5 rounded bg-ink-200 dark:bg-ink-500" />
       </div>
     );
   }
 
-  // Color del fondo según estado
-  let bg, border, mainColor;
-  if (errEnEtapa) {
-    bg = 'rgba(239, 68, 68, 0.14)';
-    border = '#FCA5A5';
-    mainColor = '#DC2626';
-  } else if (completo) {
-    bg = 'rgba(34, 197, 94, 0.15)';
-    border = '#86EFAC';
-    mainColor = '#16A34A';
-  } else {
-    bg = `${color}1f`;
-    border = `${color}66`;
-    mainColor = color;
-  }
+  const pctWidth = totalPrepacks > 0 ? Math.min(100, Math.round((llegados / totalPrepacks) * 100)) : 0;
+  const completo = totalPrepacks > 0 && llegados >= totalPrepacks;
+  const bg = errEnEtapa ? 'rgba(239, 68, 68, 0.12)' : `${color}1f`;
+  const border = errEnEtapa ? '#FCA5A5' : `${color}66`;
 
   return (
     <div
       onClick={onClick}
-      className="h-11 m-[3px_2px] rounded-md relative overflow-hidden cursor-pointer transition-all flex items-center justify-center px-1"
+      className="h-9 m-[3px_2px] rounded-md relative overflow-hidden cursor-pointer transition-all flex items-center justify-center"
       style={{ background: bg, border: `1.5px solid ${border}` }}
-      title={`${llegados} de ${total} prepacks han llegado a esta etapa (${pct}%)`}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = mainColor; }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = border; }}
+      title={`${llegados} de ${totalPrepacks} han llegado a esta etapa`}
+      onMouseEnter={(e) => {
+        if (!errEnEtapa) {
+          e.currentTarget.style.background = `${color}3a`;
+          e.currentTarget.style.borderColor = color;
+        }
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = bg;
+        e.currentTarget.style.borderColor = border;
+      }}
     >
       {/* Barra de progreso de fondo */}
       <div
-        className="absolute left-0 top-0 bottom-0 pointer-events-none transition-[width]"
-        style={{ width: `${pct}%`, background: `${mainColor}14` }}
+        className="absolute left-0 top-0 bottom-0 rounded-l-md pointer-events-none"
+        style={{ width: `${pctWidth}%`, background: `${color}10` }}
       />
 
-      {/* Contenido: X/Y grande + % chico */}
-      <div className="relative z-[1] flex items-baseline gap-1.5 font-display">
-        <div className="text-[15px] font-extrabold leading-none whitespace-nowrap" style={{ color: mainColor }}>
-          {llegados}<span className="opacity-50">/{total}</span>
-        </div>
-        <div className="text-[10px] font-bold leading-none opacity-70" style={{ color: mainColor }}>
-          {pct}%
-        </div>
-        {completo && !errEnEtapa && (
-          <span className="text-[12px] font-bold leading-none" style={{ color: mainColor }}>✓</span>
-        )}
+      {/* 3 valores apilados (formato original con labels acortados) */}
+      <div className="flex items-center w-full justify-around px-1.5 z-[1] relative">
+        {datos.map((d, i) => (
+          <div key={i} className="text-center flex-1 min-w-0">
+            <div
+              className="text-[13px] font-extrabold leading-none truncate"
+              style={{ color: errEnEtapa ? '#DC2626' : color }}
+            >
+              {d.v}
+            </div>
+            {d.l && (
+              <div
+                className="text-[7px] font-bold uppercase tracking-industrial mt-0.5 opacity-80 leading-tight truncate"
+                style={{ color: errEnEtapa ? '#991B1B' : color }}
+              >
+                {d.l}
+              </div>
+            )}
+          </div>
+        ))}
       </div>
+
+      {/* Check pequeño cuando la etapa está completa (sin cambiar todo el color) */}
+      {completo && !errEnEtapa && (
+        <div className="absolute top-0.5 right-1 text-[10px] font-bold leading-none" style={{ color }}>✓</div>
+      )}
 
       {/* Badge anomalía */}
       {errEnEtapa && (
@@ -624,6 +626,70 @@ function StageCell({ llegados, total, enRango, errEnEtapa, color, onClick }) {
       )}
     </div>
   );
+}
+
+/**
+ * Información apilada por etapa. Usa el conteo ACUMULATIVO `llegados`
+ * (cuántos prepacks ya pasaron por aquí o más adelante), no solo los que
+ * están en esta etapa ahora.
+ *
+ * Labels acortados para que no se corten en pantallas chicas:
+ *   "recibidos" → "lleg." (llegados)
+ *   "esperados" → "esp."
+ *   "%"         → "%"
+ */
+function getDatosEtapa(etapaId, llegados, oc, enEtapaActual) {
+  const total = oc.totalPrepacks || llegados;
+  const esp = oc.total_esperados || total;
+  const pct = total > 0 ? Math.round((llegados / total) * 100) : 0;
+
+  // Cuántos hay AHORA específicamente en esta etapa (para mostrar "en sitio")
+  const enSitio = enEtapaActual.length;
+  const conFalla = enEtapaActual.filter((t) => t.qa_fallido).length;
+  const ok = enSitio - conFalla;
+  const pctOk = enSitio > 0 ? Math.round((ok / enSitio) * 100) : 100;
+
+  return ({
+    PREREGISTRO: [
+      { l: 'lleg.',  v: llegados },
+      { l: 'esp.',   v: esp },
+      { l: '%',      v: `${pct}%` },
+    ],
+    QA: [
+      { l: 'revis.',  v: llegados },
+      { l: 'aprob.',  v: ok },
+      { l: 'calid.',  v: `${pctOk}%` },
+    ],
+    REGISTRO: [
+      { l: 'regis.',  v: llegados },
+      { l: 'de',      v: total },
+      { l: 'avance',  v: `${pct}%` },
+    ],
+    SORTER: [
+      { l: 'clasif.', v: llegados },
+      { l: 'total',   v: total },
+      { l: 'proc.',   v: `${pct}%` },
+    ],
+    BAHIA: [
+      { l: 'bahía',   v: llegados },
+      { l: 'total',   v: total },
+      { l: 'distr.',  v: `${pct}%` },
+    ],
+    AUDITORIA: [
+      { l: 'audit.',  v: llegados },
+      { l: 'aprob.',  v: ok },
+      { l: 'aprob.%', v: `${pctOk}%` },
+    ],
+    ENVIO: [
+      { l: 'envío',   v: llegados },
+      { l: 'de',      v: total },
+      { l: 'compl.',  v: `${pct}%` },
+    ],
+  })[etapaId] || [
+    { l: 'lleg.', v: llegados },
+    { l: 'de',    v: total },
+    { l: '%',     v: `${pct}%` },
+  ];
 }
 
 // ════════════════════════════════════════════════════════════════════
