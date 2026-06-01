@@ -120,7 +120,7 @@ export function FlujoCEDIS() {
         <div className="text-center">
           <div className="text-2xl mb-2">📦</div>
           <div className="text-ink-400">Cargando flujo del CEDIS...</div>
-          <div className="text-xs text-ink-300 mt-2">Conectando con {import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}</div>
+          <div className="text-xs text-ink-300 mt-2">Conectando con {import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'}</div>
         </div>
       </div>
     );
