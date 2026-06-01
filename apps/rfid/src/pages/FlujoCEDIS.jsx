@@ -18,11 +18,25 @@ const ZONA_LABELS = { BAHIA: 'Bahías', AUDITORIA: 'Auditoría', ENVIO: 'Envío'
 const ZONA_ACCENT = { BAHIA: '#0891B2', AUDITORIA: '#DB2777', ENVIO: '#16A34A' };
 
 /**
- * Mapeo del enum DB `Tag.etapa_actual` a la etapa visual del Gantt.
- * El esquema MySQL guarda EstadoPrepack: REGISTRADO, EN_QA, APROBADO, RECHAZADO, EN_CAJA, ENVIADO.
- * El Gantt visual usa: PREREGISTRO, QA, REGISTRO, SORTER, BAHIA, AUDITORIA, ENVIO.
- * Ajustar este mapa cuando se modelen SORTER/AUDITORIA explícitamente en el backend.
+ * Mapeo del enum DB `Tag.etapa_actual` al índice de su etapa más avanzada
+ * en el orden del Gantt visual.
+ *
+ * Orden Gantt (índices): PREREGISTRO=0, QA=1, REGISTRO=2, SORTER=3, BAHIA=4, AUDITORIA=5, ENVIO=6
+ *
+ * Lógica acumulativa: si un tag está en EN_CAJA (índice 4 BAHIA), eso significa
+ * que YA pasó por PRE-REGISTRO, QA y REGISTRO. Cuenta para todas las etapas
+ * <= 4. Esto da el "X/Y prepacks que han llegado a esta etapa" correcto.
  */
+const ETAPA_DB_A_INDICE_MAX = {
+  REGISTRADO: 0, // llegó a PRE-REGISTRO
+  EN_QA:      1, // pasó por PRE-REGISTRO y está en QA
+  RECHAZADO:  1, // pasó por PRE-REGISTRO y QA (rechazado en QA)
+  APROBADO:   2, // pasó por PRE-REGISTRO, QA y está en REGISTRO
+  EN_CAJA:    4, // pasó por PRE-REGISTRO, QA, REGISTRO, SORTER y está en BAHIA
+  ENVIADO:    6, // pasó por todo y salió
+};
+
+// Para retrocompatibilidad: la etapa visual "actual" del tag (donde está parado).
 const ETAPA_DB_TO_GANTT = {
   REGISTRADO: 'PREREGISTRO',
   EN_QA:      'QA',
@@ -282,12 +296,26 @@ function buildOcsView(ordenes, tags, anomalias) {
   const ocs = ordenes.map((oc) => {
     const tagsDeOC = tags.filter((t) => t.orden_id === oc.orden_id);
     const tagsPorEtapa = agruparTagsPorEtapaGantt(tagsDeOC);
-    const etapasConTags = ETAPAS_FLUJO.map((e, i) => ({ id: e.id, idx: i }))
-      .filter(({ id }) => (tagsPorEtapa[id]?.length ?? 0) > 0);
-    const idxMin = etapasConTags.length ? etapasConTags[0].idx : 0;
-    const idxMax = etapasConTags.length ? etapasConTags[etapasConTags.length - 1].idx : 0;
 
-    const total_esperados = oc.total_esperados || 0;
+    // CONTEO ACUMULATIVO: por cada etapa visual, cuántos prepacks ya pasaron
+    // por ahí (es decir, etapa_actual con índice >= etapa visual).
+    // Si un tag está en EN_CAJA (índice 4 = BAHIA), cuenta para las etapas
+    // 0, 1, 2, 3 y 4. Eso refleja el avance real.
+    const llegadosPorEtapa = {};
+    ETAPAS_FLUJO.forEach((etapa, idx) => {
+      llegadosPorEtapa[etapa.id] = tagsDeOC.filter((t) => {
+        const idxMaxTag = ETAPA_DB_A_INDICE_MAX[t.etapa_actual];
+        return idxMaxTag != null && idxMaxTag >= idx;
+      }).length;
+    });
+
+    // Para el rango visual (idxMin/idxMax) del Gantt
+    const etapasConActividad = ETAPAS_FLUJO.map((e, i) => ({ id: e.id, idx: i }))
+      .filter(({ id }) => llegadosPorEtapa[id] > 0);
+    const idxMin = 0; // siempre desde PRE-REGISTRO
+    const idxMax = etapasConActividad.length ? etapasConActividad[etapasConActividad.length - 1].idx : 0;
+
+    const total_esperados = oc.total_esperados || tagsDeOC.length || 0;
     const total_recibidos = oc.total_recibidos || 0;
     const pct = total_esperados > 0 ? (total_recibidos / total_esperados) * 100 : 0;
 
@@ -308,8 +336,9 @@ function buildOcsView(ordenes, tags, anomalias) {
       pct,
       hasErr,
       tags: tagsDeOC,
-      tagsPorEtapa,
-      etapasActivas: etapasConTags.map((e) => e.id),
+      tagsPorEtapa,         // sigue siendo "los que están ahorita en esa etapa exacta" (para ModalOC)
+      llegadosPorEtapa,     // NUEVO: acumulativo, los que ya pasaron por esa etapa
+      etapasActivas: etapasConActividad.map((e) => e.id),
       idxMin,
       idxMax,
       etapa_logs: [],
@@ -497,24 +526,22 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
       </div>
 
       {ETAPAS_FLUJO.map((etapa, idx) => {
-        const tagsEnEtapa = oc.tagsPorEtapa[etapa.id] || [];
-        const tienePrep = tagsEnEtapa.length > 0;
+        const llegados = oc.llegadosPorEtapa?.[etapa.id] ?? 0;
+        const total = oc.totalPrepacks || 0;
+        const enEtapaActual = oc.tagsPorEtapa[etapa.id] || [];
+        const errEnEtapa = enEtapaActual.some((t) => t.qa_fallido === true);
         const enRango = idx >= oc.idxMin && idx <= oc.idxMax;
-        const errEnEtapa = tagsEnEtapa.some((t) => t.qa_fallido === true);
         const color = ETAPA_COLORS[etapa.id] || '#94A3B8';
-        const datos = tienePrep ? getDatosEtapa(etapa.id, tagsEnEtapa, oc) : null;
 
         return (
           <StageCell
             key={etapa.id}
-            tienePrep={tienePrep}
+            llegados={llegados}
+            total={total}
             enRango={enRango}
             errEnEtapa={errEnEtapa}
             color={color}
-            datos={datos}
-            tagsEnEtapaCount={tagsEnEtapa.length}
-            totalPrepacks={oc.totalPrepacks}
-            onClick={() => tienePrep && onClickSegmento(oc, etapa.id)}
+            onClick={() => (llegados > 0 || enEtapaActual.length > 0) && onClickSegmento(oc, etapa.id)}
           />
         );
       })}
@@ -522,84 +549,81 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
   );
 }
 
-function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, tagsEnEtapaCount, totalPrepacks, onClick }) {
+/**
+ * Celda compacta de etapa. Muestra:
+ *   - Vacía (sin tags llegados y fuera del rango activo de la OC).
+ *   - Pendiente (en rango pero 0 llegados): línea punteada.
+ *   - Parcial: "X/Y" + "NN%" con color de la etapa.
+ *   - Completa (X == Y): verde sólido con ✓.
+ *   - Anomalía: badge rojo encima.
+ */
+function StageCell({ llegados, total, enRango, errEnEtapa, color, onClick }) {
+  const tienePrep = llegados > 0;
+  const completo = total > 0 && llegados >= total;
+  const pct = total > 0 ? Math.round((llegados / total) * 100) : 0;
+
   if (!tienePrep && !enRango) {
-    return <div className="h-9 m-[3px_2px]" />;
+    return <div className="h-11 m-[3px_2px]" />;
   }
 
   if (!tienePrep && enRango) {
     return (
-      <div className="h-9 m-[3px_2px] rounded-md flex items-center justify-center bg-ink-50/50 border border-dashed border-ink-100 dark:bg-ink-800/30 dark:border-ink-600">
+      <div className="h-11 m-[3px_2px] rounded-md flex items-center justify-center bg-ink-50/50 border border-dashed border-ink-100 dark:bg-ink-800/30 dark:border-ink-600">
         <div className="w-5 h-0.5 rounded bg-ink-200 dark:bg-ink-500" />
       </div>
     );
   }
 
-  const pctWidth = totalPrepacks > 0 ? Math.min(100, Math.round((tagsEnEtapaCount / totalPrepacks) * 100)) : 0;
-  const bg = errEnEtapa ? 'rgba(239, 68, 68, 0.12)' : `${color}1f`;
-  const border = errEnEtapa ? '#FCA5A5' : `${color}66`;
+  // Color del fondo según estado
+  let bg, border, mainColor;
+  if (errEnEtapa) {
+    bg = 'rgba(239, 68, 68, 0.14)';
+    border = '#FCA5A5';
+    mainColor = '#DC2626';
+  } else if (completo) {
+    bg = 'rgba(34, 197, 94, 0.15)';
+    border = '#86EFAC';
+    mainColor = '#16A34A';
+  } else {
+    bg = `${color}1f`;
+    border = `${color}66`;
+    mainColor = color;
+  }
 
   return (
     <div
       onClick={onClick}
-      className="h-9 m-[3px_2px] rounded-md relative overflow-hidden cursor-pointer transition-all flex items-center justify-center"
+      className="h-11 m-[3px_2px] rounded-md relative overflow-hidden cursor-pointer transition-all flex items-center justify-center px-1"
       style={{ background: bg, border: `1.5px solid ${border}` }}
-      onMouseEnter={(e) => {
-        if (!errEnEtapa) {
-          e.currentTarget.style.background = `${color}3a`;
-          e.currentTarget.style.borderColor = color;
-        }
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = bg;
-        e.currentTarget.style.borderColor = border;
-      }}
+      title={`${llegados} de ${total} prepacks han llegado a esta etapa (${pct}%)`}
+      onMouseEnter={(e) => { e.currentTarget.style.borderColor = mainColor; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderColor = border; }}
     >
+      {/* Barra de progreso de fondo */}
       <div
-        className="absolute left-0 top-0 bottom-0 rounded-l-md pointer-events-none"
-        style={{ width: `${pctWidth}%`, background: `${color}10` }}
+        className="absolute left-0 top-0 bottom-0 pointer-events-none transition-[width]"
+        style={{ width: `${pct}%`, background: `${mainColor}14` }}
       />
 
-      <div className="flex items-center w-full justify-around px-1.5 z-[1] relative">
-        {datos.map((d, i) => (
-          <div key={i} className="text-center flex-1">
-            <div className="text-[13px] font-extrabold leading-none" style={{ color: errEnEtapa ? '#DC2626' : color }}>
-              {d.v}
-            </div>
-            {d.l && (
-              <div className="text-[7px] font-bold uppercase tracking-industrial mt-0.5 opacity-80 leading-tight" style={{ color: errEnEtapa ? '#991B1B' : color }}>
-                {d.l}
-              </div>
-            )}
-          </div>
-        ))}
+      {/* Contenido: X/Y grande + % chico */}
+      <div className="relative z-[1] flex items-baseline gap-1.5 font-display">
+        <div className="text-[15px] font-extrabold leading-none whitespace-nowrap" style={{ color: mainColor }}>
+          {llegados}<span className="opacity-50">/{total}</span>
+        </div>
+        <div className="text-[10px] font-bold leading-none opacity-70" style={{ color: mainColor }}>
+          {pct}%
+        </div>
+        {completo && !errEnEtapa && (
+          <span className="text-[12px] font-bold leading-none" style={{ color: mainColor }}>✓</span>
+        )}
       </div>
 
+      {/* Badge anomalía */}
       {errEnEtapa && (
         <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-anomaly border-2 border-white animate-[pulse-rojo_1.4s_ease-in-out_infinite]" />
       )}
     </div>
   );
-}
-
-function getDatosEtapa(etapaId, tagsEnEtapa, oc) {
-  const total = oc.totalPrepacks || tagsEnEtapa.length;
-  const n = tagsEnEtapa.length;
-  const pct = total > 0 ? Math.round((n / total) * 100) : 0;
-  const err = tagsEnEtapa.filter((t) => t.qa_fallido).length;
-  const ok = n - err;
-  const pctOk = n > 0 ? Math.round((ok / n) * 100) : 100;
-  const esp = oc.total_esperados || total;
-
-  return ({
-    PREREGISTRO: [{ l: 'recibidos',   v: n },  { l: 'esperados',  v: esp }, { l: '%',           v: `${pct}%` }],
-    QA:          [{ l: 'revisados',   v: n },  { l: 'aprobados',  v: ok },  { l: 'calidad',     v: `${pctOk}%` }],
-    REGISTRO:    [{ l: 'registrados', v: n },  { l: 'de',         v: total },{ l: 'avance',     v: `${pct}%` }],
-    SORTER:      [{ l: 'clasificados',v: n },  { l: 'total',      v: total },{ l: 'procesado',  v: `${pct}%` }],
-    BAHIA:       [{ l: 'en bahía',    v: n },  { l: 'total',      v: total },{ l: 'distribuido',v: `${pct}%` }],
-    AUDITORIA:   [{ l: 'auditados',   v: n },  { l: 'aprobados',  v: ok },  { l: 'aprobación',  v: `${pctOk}%` }],
-    ENVIO:       [{ l: 'enviados',    v: n },  { l: 'de',         v: total },{ l: 'completado', v: `${pct}%` }],
-  })[etapaId] || [{ l: 'prepacks', v: n }, { l: '', v: '' }, { l: '%', v: `${pct}%` }];
 }
 
 // ════════════════════════════════════════════════════════════════════
