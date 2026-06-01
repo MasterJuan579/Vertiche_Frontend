@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { ETAPA_COLORS, ETAPA_LABELS, getColorCSS, esColorClaro } from '../data/demoOCs.js';
+import { ETAPA_COLORS, ETAPA_LABELS, getColorCSS, esColorClaro } from '../data/etapas.js';
 import { buildTablaPrepack } from '../utils/sizeTable.js';
 
 /**
