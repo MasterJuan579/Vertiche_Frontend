@@ -18,25 +18,11 @@ const ZONA_LABELS = { BAHIA: 'Bahías', AUDITORIA: 'Auditoría', ENVIO: 'Envío'
 const ZONA_ACCENT = { BAHIA: '#0891B2', AUDITORIA: '#DB2777', ENVIO: '#16A34A' };
 
 /**
- * Mapeo del enum DB `Tag.etapa_actual` al índice de su etapa más avanzada
- * en el orden del Gantt visual.
- *
- * Orden Gantt (índices): PREREGISTRO=0, QA=1, REGISTRO=2, SORTER=3, BAHIA=4, AUDITORIA=5, ENVIO=6
- *
- * Lógica acumulativa: si un tag está en EN_CAJA (índice 4 BAHIA), eso significa
- * que YA pasó por PRE-REGISTRO, QA y REGISTRO. Cuenta para todas las etapas
- * <= 4. Esto da el "X/Y prepacks que han llegado a esta etapa" correcto.
+ * Mapeo del enum DB `Tag.etapa_actual` a la etapa visual del Gantt.
+ * El esquema MySQL guarda EstadoPrepack: REGISTRADO, EN_QA, APROBADO, RECHAZADO, EN_CAJA, ENVIADO.
+ * El Gantt visual usa: PREREGISTRO, QA, REGISTRO, SORTER, BAHIA, AUDITORIA, ENVIO.
+ * Un tag aparece SOLO en la etapa donde está actualmente, no en las anteriores.
  */
-const ETAPA_DB_A_INDICE_MAX = {
-  REGISTRADO: 0, // llegó a PRE-REGISTRO
-  EN_QA:      1, // pasó por PRE-REGISTRO y está en QA
-  RECHAZADO:  1, // pasó por PRE-REGISTRO y QA (rechazado en QA)
-  APROBADO:   2, // pasó por PRE-REGISTRO, QA y está en REGISTRO
-  EN_CAJA:    4, // pasó por PRE-REGISTRO, QA, REGISTRO, SORTER y está en BAHIA
-  ENVIADO:    6, // pasó por todo y salió
-};
-
-// Para retrocompatibilidad: la etapa visual "actual" del tag (donde está parado).
 const ETAPA_DB_TO_GANTT = {
   REGISTRADO: 'PREREGISTRO',
   EN_QA:      'QA',
@@ -298,26 +284,12 @@ function buildOcsView(ordenes, tags, anomalias) {
   const ocs = ordenes.map((oc) => {
     const tagsDeOC = tags.filter((t) => t.orden_id === oc.orden_id);
     const tagsPorEtapa = agruparTagsPorEtapaGantt(tagsDeOC);
+    const etapasConTags = ETAPAS_FLUJO.map((e, i) => ({ id: e.id, idx: i }))
+      .filter(({ id }) => (tagsPorEtapa[id]?.length ?? 0) > 0);
+    const idxMin = etapasConTags.length ? etapasConTags[0].idx : 0;
+    const idxMax = etapasConTags.length ? etapasConTags[etapasConTags.length - 1].idx : 0;
 
-    // CONTEO ACUMULATIVO: por cada etapa visual, cuántos prepacks ya pasaron
-    // por ahí (es decir, etapa_actual con índice >= etapa visual).
-    // Si un tag está en EN_CAJA (índice 4 = BAHIA), cuenta para las etapas
-    // 0, 1, 2, 3 y 4. Eso refleja el avance real.
-    const llegadosPorEtapa = {};
-    ETAPAS_FLUJO.forEach((etapa, idx) => {
-      llegadosPorEtapa[etapa.id] = tagsDeOC.filter((t) => {
-        const idxMaxTag = ETAPA_DB_A_INDICE_MAX[t.etapa_actual];
-        return idxMaxTag != null && idxMaxTag >= idx;
-      }).length;
-    });
-
-    // Para el rango visual (idxMin/idxMax) del Gantt
-    const etapasConActividad = ETAPAS_FLUJO.map((e, i) => ({ id: e.id, idx: i }))
-      .filter(({ id }) => llegadosPorEtapa[id] > 0);
-    const idxMin = 0; // siempre desde PRE-REGISTRO
-    const idxMax = etapasConActividad.length ? etapasConActividad[etapasConActividad.length - 1].idx : 0;
-
-    const total_esperados = oc.total_esperados || tagsDeOC.length || 0;
+    const total_esperados = oc.total_esperados || 0;
     const total_recibidos = oc.total_recibidos || 0;
     const pct = total_esperados > 0 ? (total_recibidos / total_esperados) * 100 : 0;
 
@@ -338,9 +310,8 @@ function buildOcsView(ordenes, tags, anomalias) {
       pct,
       hasErr,
       tags: tagsDeOC,
-      tagsPorEtapa,         // sigue siendo "los que están ahorita en esa etapa exacta" (para ModalOC)
-      llegadosPorEtapa,     // NUEVO: acumulativo, los que ya pasaron por esa etapa
-      etapasActivas: etapasConActividad.map((e) => e.id),
+      tagsPorEtapa,
+      etapasActivas: etapasConTags.map((e) => e.id),
       idxMin,
       idxMax,
       etapa_logs: [],
@@ -528,13 +499,12 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
       </div>
 
       {ETAPAS_FLUJO.map((etapa, idx) => {
-        const llegados = oc.llegadosPorEtapa?.[etapa.id] ?? 0;
-        const enEtapaActual = oc.tagsPorEtapa[etapa.id] || [];
-        const tienePrep = llegados > 0;
+        const tagsEnEtapa = oc.tagsPorEtapa[etapa.id] || [];
+        const tienePrep = tagsEnEtapa.length > 0;
         const enRango = idx >= oc.idxMin && idx <= oc.idxMax;
-        const errEnEtapa = enEtapaActual.some((t) => t.qa_fallido === true);
+        const errEnEtapa = tagsEnEtapa.some((t) => t.qa_fallido === true);
         const color = ETAPA_COLORS[etapa.id] || '#94A3B8';
-        const datos = tienePrep ? getDatosEtapa(etapa.id, llegados, oc, enEtapaActual) : null;
+        const datos = tienePrep ? getDatosEtapa(etapa.id, tagsEnEtapa, oc) : null;
 
         return (
           <StageCell
@@ -544,7 +514,7 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
             errEnEtapa={errEnEtapa}
             color={color}
             datos={datos}
-            llegados={llegados}
+            tagsEnEtapaCount={tagsEnEtapa.length}
             totalPrepacks={oc.totalPrepacks}
             onClick={() => tienePrep && onClickSegmento(oc, etapa.id)}
           />
@@ -554,7 +524,7 @@ function BarraOC({ oc, columnWidths, onClickSegmento, onClickNombre }) {
   );
 }
 
-function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, llegados, totalPrepacks, onClick }) {
+function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, tagsEnEtapaCount, totalPrepacks, onClick }) {
   if (!tienePrep && !enRango) {
     return <div className="h-9 m-[3px_2px]" />;
   }
@@ -567,8 +537,7 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, llegados, tot
     );
   }
 
-  const pctWidth = totalPrepacks > 0 ? Math.min(100, Math.round((llegados / totalPrepacks) * 100)) : 0;
-  const completo = totalPrepacks > 0 && llegados >= totalPrepacks;
+  const pctWidth = totalPrepacks > 0 ? Math.min(100, Math.round((tagsEnEtapaCount / totalPrepacks) * 100)) : 0;
   const bg = errEnEtapa ? 'rgba(239, 68, 68, 0.12)' : `${color}1f`;
   const border = errEnEtapa ? '#FCA5A5' : `${color}66`;
 
@@ -577,7 +546,7 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, llegados, tot
       onClick={onClick}
       className="h-9 m-[3px_2px] rounded-md relative overflow-hidden cursor-pointer transition-all flex items-center justify-center"
       style={{ background: bg, border: `1.5px solid ${border}` }}
-      title={`${llegados} de ${totalPrepacks} han llegado a esta etapa`}
+      title={`${tagsEnEtapaCount} prepacks actualmente en esta etapa`}
       onMouseEnter={(e) => {
         if (!errEnEtapa) {
           e.currentTarget.style.background = `${color}3a`;
@@ -595,7 +564,7 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, llegados, tot
         style={{ width: `${pctWidth}%`, background: `${color}10` }}
       />
 
-      {/* 3 valores apilados (formato original con labels acortados) */}
+      {/* 3 valores apilados con labels acortados */}
       <div className="flex items-center w-full justify-around px-1.5 z-[1] relative">
         {datos.map((d, i) => (
           <div key={i} className="text-center flex-1 min-w-0">
@@ -617,11 +586,6 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, llegados, tot
         ))}
       </div>
 
-      {/* Check pequeño cuando la etapa está completa (sin cambiar todo el color) */}
-      {completo && !errEnEtapa && (
-        <div className="absolute top-0.5 right-1 text-[10px] font-bold leading-none" style={{ color }}>✓</div>
-      )}
-
       {/* Badge anomalía */}
       {errEnEtapa && (
         <div className="absolute top-1 right-1 w-2 h-2 rounded-full bg-anomaly border-2 border-white animate-[pulse-rojo_1.4s_ease-in-out_infinite]" />
@@ -631,66 +595,59 @@ function StageCell({ tienePrep, enRango, errEnEtapa, color, datos, llegados, tot
 }
 
 /**
- * Información apilada por etapa. Usa el conteo ACUMULATIVO `llegados`
- * (cuántos prepacks ya pasaron por aquí o más adelante), no solo los que
- * están en esta etapa ahora.
- *
- * Labels acortados para que no se corten en pantallas chicas:
- *   "recibidos" → "lleg." (llegados)
- *   "esperados" → "esp."
- *   "%"         → "%"
+ * Información apilada por etapa (lógica original: cuenta solo los tags que
+ * están AHORA en esta etapa). Labels acortados para que no se corten en
+ * pantallas chicas.
  */
-function getDatosEtapa(etapaId, llegados, oc, enEtapaActual) {
-  const total = oc.totalPrepacks || llegados;
+function getDatosEtapa(etapaId, tagsEnEtapa, oc) {
+  const total = oc.totalPrepacks || tagsEnEtapa.length;
+  const n = tagsEnEtapa.length;
+  const pct = total > 0 ? Math.round((n / total) * 100) : 0;
+  const err = tagsEnEtapa.filter((t) => t.qa_fallido).length;
+  const ok = n - err;
+  const pctOk = n > 0 ? Math.round((ok / n) * 100) : 100;
   const esp = oc.total_esperados || total;
-  const pct = total > 0 ? Math.round((llegados / total) * 100) : 0;
-
-  // Cuántos hay AHORA específicamente en esta etapa (para mostrar "en sitio")
-  const enSitio = enEtapaActual.length;
-  const conFalla = enEtapaActual.filter((t) => t.qa_fallido).length;
-  const ok = enSitio - conFalla;
-  const pctOk = enSitio > 0 ? Math.round((ok / enSitio) * 100) : 100;
 
   return ({
     PREREGISTRO: [
-      { l: 'lleg.',  v: llegados },
-      { l: 'esp.',   v: esp },
-      { l: '%',      v: `${pct}%` },
+      { l: 'recib.',  v: n },
+      { l: 'esp.',    v: esp },
+      { l: '%',       v: `${pct}%` },
     ],
     QA: [
-      { l: 'revis.',  v: llegados },
+      { l: 'revis.',  v: n },
       { l: 'aprob.',  v: ok },
       { l: 'calid.',  v: `${pctOk}%` },
     ],
     REGISTRO: [
-      { l: 'regis.',  v: llegados },
+      { l: 'regis.',  v: n },
       { l: 'de',      v: total },
       { l: 'avance',  v: `${pct}%` },
     ],
     SORTER: [
-      { l: 'clasif.', v: llegados },
+      { l: 'clasif.', v: n },
       { l: 'total',   v: total },
       { l: 'proc.',   v: `${pct}%` },
     ],
     BAHIA: [
-      { l: 'bahía',   v: llegados },
+      { l: 'bahía',   v: n },
       { l: 'total',   v: total },
       { l: 'distr.',  v: `${pct}%` },
     ],
     AUDITORIA: [
-      { l: 'audit.',  v: llegados },
+      { l: 'audit.',  v: n },
       { l: 'aprob.',  v: ok },
       { l: 'aprob.%', v: `${pctOk}%` },
     ],
     ENVIO: [
-      { l: 'envío',   v: llegados },
+      { l: 'envío',   v: n },
       { l: 'de',      v: total },
       { l: 'compl.',  v: `${pct}%` },
     ],
   })[etapaId] || [
-    { l: 'lleg.', v: llegados },
-    { l: 'de',    v: total },
-    { l: '%',     v: `${pct}%` },
+    { l: 'prepacks', v: n },
+    { l: '',         v: '' },
+    { l: '%',        v: `${pct}%` },
   ];
 }
 
