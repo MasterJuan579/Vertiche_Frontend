@@ -5,6 +5,19 @@ import { AnomaliaAlert } from '../components/AnomaliaAlert.jsx';
 import { realApi } from '../services/realApi.js';
 import { onSocket } from '../services/socketClient.js';
 
+const ETAPA_FILTRO_LABEL = {
+  RECEPCION: 'PRE-REG',
+  REGISTRO:  'REG',
+  SORTING:   'SORTER',
+  PACKING:   'BAHIA',
+  AUDITORIA: 'AUDIT',
+  SALIDA:    'ENVIO',
+};
+
+function etiquetaEtapaFiltro(e) {
+  return ETAPA_FILTRO_LABEL[e] || e;
+}
+
 /**
  * Bitácora de lecturas — vista operativa en vivo.
  * Lado izquierdo: stream de EventoLectura (filtra por etapa).
@@ -211,7 +224,7 @@ export function Bitacora() {
                   : 'bg-white text-ink-500 border border-ink-100 hover:bg-ink-50 dark:bg-ink-700 dark:text-ink-300 dark:border-ink-500 dark:hover:bg-ink-600'
               }`}
             >
-              {e === 'TODAS' ? 'TODAS' : (e === 'RECEPCION' ? 'PRE-REG' : e)}
+              {e === 'TODAS' ? 'TODAS' : etiquetaEtapaFiltro(e)}
             </button>
           ))}
           <span className="ml-auto self-center text-[11px] text-ink-400">

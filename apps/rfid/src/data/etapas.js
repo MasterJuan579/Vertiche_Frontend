@@ -36,12 +36,14 @@ export const ETAPA_LABELS = {
   AUDITORIA:   'Auditoría',
   ENVIO:       'Envío',
   // También los enums DB para compatibilidad cuando se muestre etapa_actual cruda
-  REGISTRADO:  'Registrado',
-  EN_QA:       'En QA',
-  APROBADO:    'Aprobado',
-  RECHAZADO:   'Rechazado',
-  EN_CAJA:     'En caja',
-  ENVIADO:     'Enviado',
+  REGISTRADO:   'Registrado',
+  EN_QA:        'En QA',
+  APROBADO:     'Aprobado',
+  EN_SORTING:   'En sorter',
+  EN_CAJA:      'En caja',
+  EN_AUDITORIA: 'En auditoría',
+  RECHAZADO:    'Rechazado',
+  ENVIADO:      'Enviado',
 };
 
 // ============================================
