@@ -31,6 +31,17 @@ apps/rfid/src/
 └── utils/                 ← format de hora/dur, helpers
 ```
 
+## Componentes UI reutilizables (inline en las páginas)
+
+Vivien dentro de `Vinculacion.jsx` y `Trazabilidad.jsx` por proximidad de uso. Si crecen, considerar moverlos a `components/`:
+
+- **`ProductIcon`** — SVG inline que detecta el tipo de prenda (camiseta, pantalón, vestido, etc.) por keywords del SKU o categoría del proveedor. Reemplaza emojis para mejor consistencia visual y soporte de dark mode.
+- **`StoreIcon`** — ícono SVG de tienda destino.
+- **`StarIcon` + `StarRow`** — visualización de calificación (1-5 estrellas).
+- **`ProveedorRatingChip`** — bloque compacto con StarRow + chip de nivel (ELITE/MEDIA/BAJA) + % aprobación. Usado en Modal Nueva OC, panel "Orden de compra activa" y Trazabilidad.
+- **`ColorPicker`** — selector visual de color con paleta cerrada de 14 swatches + input libre. Normaliza el valor a Title Case ("azul" → "Azul").
+- **`RefreshIcon`** — botón "Actualizar" en FlujoCEDIS.
+
 ## Configuración
 
 Crear `.env` en la **raíz del monorepo** (`Vertiche_Frontend/.env`):
@@ -54,6 +65,9 @@ Abre `http://localhost:5173`. Login con cualquier email/password (mockSignIn), r
 | `lectura` | Bitácora prepend, FlujoCEDIS recarga, Trazabilidad refresca si es el EPC activo. |
 | `anomalia` | Bitácora prepend en panel derecho. |
 | `tag` | FlujoCEDIS recarga, Trazabilidad refresca si es el EPC activo. |
+| `uid-detectado` | Modal "Asignar EPC" en Vinculación autocompleta el input cuando llega un UID del Lector 1 del ESP32. |
+| `prepack-asignado` | Vinculación refresca el grid de prepacks (la celda asignada pasa de gris a verde). |
+| `proveedor-actualizado` | (No usado en RFID directamente — pero el frontend de team-proveedores puede suscribirse para refrescar el rating sin polling). |
 
 ## Documentación completa
 
