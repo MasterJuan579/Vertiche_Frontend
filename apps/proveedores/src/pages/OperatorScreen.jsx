@@ -2,797 +2,222 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@vertiche/design-system';
 import { OperatorBar } from '../components/OperatorBar.jsx';
 import { NivelBadge } from '../components/NivelBadge.jsx';
-import { Stars } from '../components/Stars.jsx';
-import { crearInspeccion, fetchPendientes } from '../api/proveedores.js';
 import {
-  CARGO_SCENARIOS,
-  PRODUCT_CATALOG,
-  DEFECT_TYPES,
-  MOCK_EPCS,
-  COLOR_MAP,
-  SUPPLIER_PROFILES,
-  SUPPLIERS_INITIAL,
-  calcSampleSize,
-  sampleHint,
-} from '../data/demoData.js';
+  crearInspeccion,
+  escanearPrepack,
+  fetchPendientes,
+} from '../api/proveedores.js';
+import { DEFECT_TYPES, MOCK_EPCS } from '../data/demoData.js';
 
-// Mapea la decisión interna de la UI al enum que espera el backend.
+// Mapea la decisión interna del UI al enum del backend.
 const RESULTADO_BACKEND = {
-  reject: 'RECHAZADO',
-  pass:   'OBSERVADO',
+  approve: 'APROBADO',
+  observe: 'OBSERVADO',
+  reject:  'RECHAZADO',
 };
 
-/**
- * QA inspector's main screen. Cycles through CARGO_SCENARIOS to simulate
- * trucks arriving at the bay. For each scenario, the inspector reviews
- * sample-sized prepacks and reports "siniestros" (defects) for any that
- * fail QA.
- *
- * Siniestro capture is a 3-step sub-flow:
- *   1. Type → pick a defect category + add notes
- *   2. RFID → simulate or type the prepack's EPC
- *   3. Decide → reject the prepack or pass it with observation
- *
- * In production this would POST to /api/inspeccion-qa per siniestro and
- * PUT to /api/proveedores/:id/calificacion on finish. Currently mock-only.
- */
-
-const SINIESTRO_IDLE   = 'idle';
-const SINIESTRO_TYPE   = 'type';
-const SINIESTRO_RFID   = 'rfid';
-const SINIESTRO_DECIDE = 'decide';
-
-const STEP_DOT_CLS = {
-  blue:  'bg-rfid',
-  amber: 'bg-attention-ring',
-  red:   'bg-anomaly-ring',
-};
+// Máquina de estados del flujo de inspección.
+//   idle      → mostrando input de escaneo
+//   scanning  → POST /PlanQA/escanear en vuelo
+//   pasa      → resultado del backend = PASA (no inspeccionar)
+//   revisar   → resultado del backend = REVISAR (inspeccionar)
+//   inspect   → capturando defectos + decisión
+//   submit    → POST /InspeccionQA/crearInspeccion en vuelo
+const F_IDLE     = 'idle';
+const F_SCANNING = 'scanning';
+const F_PASA     = 'pasa';
+const F_REVISAR  = 'revisar';
+const F_INSPECT  = 'inspect';
+const F_SUBMIT   = 'submit';
 
 export function OperatorScreen() {
   const { session } = useAuth();
-  const [review, setReview]         = useState(null);
-  const [siniestros, setSiniestros] = useState([]);
-  const [sinStep, setSinStep]       = useState(SINIESTRO_IDLE);
-  const [sinDraft, setSinDraft]     = useState({ types: [], notes: '', otherText: '', ppk: null });
-  const [rfidInput, setRfidInput]   = useState('');
-  const [rfidOk, setRfidOk]         = useState(false);
-  const [cycleIdx, setCycleIdx]     = useState(0);
-  const [cycleNum, setCycleNum]     = useState(1);
 
-  // Pendientes por proveedor (cuánto le falta a cada uno hoy).
-  // Cuando se conecte la lógica de decremento, este array se actualizará tras
-  // cada inspección registrada.
+  // ─── Pendientes ────────────────────────────────────
   const [pendientes, setPendientes] = useState([]);
   const [pendientesLoading, setPendientesLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadPendientes = () => {
     fetchPendientes()
-      .then((data) => {
-        if (!cancelled) {
-          setPendientes(Array.isArray(data) ? data : []);
-          setPendientesLoading(false);
-        }
-      })
-      .catch((err) => {
-        console.error('Error al cargar pendientes:', err);
-        if (!cancelled) setPendientesLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, []);
+      .then((data) => setPendientes(Array.isArray(data) ? data : []))
+      .catch((err) => console.error('Error al cargar pendientes:', err))
+      .finally(() => setPendientesLoading(false));
+  };
+  useEffect(() => { loadPendientes(); }, []);
 
-  const startReview = () => {
-    const scenario = CARGO_SCENARIOS[cycleIdx % CARGO_SCENARIOS.length];
-    const supplier = SUPPLIERS_INITIAL.find((s) => s.id === scenario.supplierId);
-    const profile  = SUPPLIER_PROFILES[scenario.supplierId];
-    setReview({
-      supplier,
-      profile,
-      scenario,
-      sampleSize: calcSampleSize(supplier.stars, scenario.qty),
-    });
-    setSiniestros([]);
-    setSinStep(SINIESTRO_IDLE);
-    setSinDraft({ types: [], notes: '', otherText: '', ppk: null });
-    setRfidInput('');
-    setRfidOk(false);
-    setCycleIdx((i) => i + 1);
+  // ─── Flujo de escaneo ──────────────────────────────
+  const [flow, setFlow]             = useState(F_IDLE);
+  const [scanInput, setScanInput]   = useState('');
+  const [scanError, setScanError]   = useState(null);
+  const [scannedEpc, setScannedEpc] = useState(null);
+  const [scanData, setScanData]     = useState(null); // respuesta completa del /escanear
+
+  // ─── Captura de inspección ─────────────────────────
+  const [defectTypes, setDefectTypes] = useState([]);
+  const [otherText, setOtherText]     = useState('');
+  const [notes, setNotes]             = useState('');
+  const [submitError, setSubmitError] = useState(null);
+
+  const [counter, setCounter] = useState(1);
+
+  // ─── Acciones ──────────────────────────────────────
+  const reset = () => {
+    setFlow(F_IDLE);
+    setScanInput('');
+    setScannedEpc(null);
+    setScanData(null);
+    setScanError(null);
+    setDefectTypes([]);
+    setOtherText('');
+    setNotes('');
+    setSubmitError(null);
   };
 
-  const finishReview = () => {
-    // In production: POST each siniestro, PUT updated rating.
-    // For mock-only: just clear state and bump the cycle counter.
-    setReview(null);
-    setCycleNum((n) => n + 1);
+  const doScan = async (epc) => {
+    setFlow(F_SCANNING);
+    setScanError(null);
+    try {
+      const data = await escanearPrepack(epc);
+      // El backend puede responder con string crudo o con objeto envolvente.
+      const raw = typeof data === 'string'
+        ? data
+        : (data.decision || data.resultado || data.accion || data.estado || '');
+      const decision = String(raw).toUpperCase();
+
+      setScannedEpc(epc);
+      setScanData(typeof data === 'object' ? data : null);
+
+      if (decision === 'PASA') {
+        setFlow(F_PASA);
+      } else if (decision === 'REVISAR') {
+        setFlow(F_REVISAR);
+      } else {
+        console.warn('Respuesta inesperada de /PlanQA/escanear:', data);
+        setScanError(`Respuesta inesperada del servidor: ${JSON.stringify(data)}`);
+        setFlow(F_IDLE);
+      }
+    } catch (err) {
+      console.error('Error al escanear:', err);
+      setScanError(err.message);
+      setFlow(F_IDLE);
+    }
   };
 
-  const startSiniestro = () => {
-    setSinDraft({ types: [], notes: '', otherText: '', ppk: null });
-    setRfidInput('');
-    setRfidOk(false);
-    setSinStep(SINIESTRO_TYPE);
+  const handleSimulate = () => {
+    const epc = MOCK_EPCS[(counter - 1) % MOCK_EPCS.length];
+    setScanInput(epc);
+    doScan(epc);
   };
-  const toggleType = (cat) => setSinDraft((d) => {
-    const types = d.types.includes(cat)
-      ? d.types.filter((t) => t !== cat)
-      : [...d.types, cat];
-    return { ...d, types };
-  });
-  const goToRfid = () => { if (sinDraft.types.length > 0) setSinStep(SINIESTRO_RFID); };
-  const simulateRfid = () => {
-    const epc = MOCK_EPCS[siniestros.length % MOCK_EPCS.length];
-    setRfidInput(epc);
-    setRfidOk(true);
-    setSinDraft((d) => ({ ...d, ppk: epc }));
+  const handleManual = () => {
+    const epc = scanInput.trim();
+    if (epc) doScan(epc);
   };
-  const goToDecide = () => { if (rfidOk) setSinStep(SINIESTRO_DECIDE); };
-  const finalizeSiniestro = (decision) => {
-    // Si hay múltiples defectos, algunos pueden ser "Otro (especificar)"
-    // pero por simplicidad, enviamos el otherText si existe
-    const types = sinDraft.types.map((t) => 
-      t === 'Otro (especificar)' && sinDraft.otherText ? sinDraft.otherText : t
-    );
+  const handleScanNext = () => {
+    setCounter((c) => c + 1);
+    reset();
+  };
+  const handleStartInspecting = () => setFlow(F_INSPECT);
 
-    // Payload para el backend. Ahora defecto_tipo es un array
+  const toggleDefect = (cat) => {
+    setDefectTypes((d) => (
+      d.includes(cat) ? d.filter((t) => t !== cat) : [...d, cat]
+    ));
+  };
+
+  const handleSubmit = async (decision) => {
+    setFlow(F_SUBMIT);
+    setSubmitError(null);
+
+    const isApproved = decision === 'approve';
+    let defecto_tipo = null;
+    let observacion  = null;
+
+    if (!isApproved) {
+      const finalDefects = defectTypes.map((t) =>
+        t === 'Otro (especificar)' && otherText ? otherText : t
+      );
+      // El backend espera defecto_tipo (singular). Si hay varios, los unimos.
+      defecto_tipo = finalDefects.length > 0 ? finalDefects.join(', ') : null;
+      observacion  = notes.trim() || null;
+    }
+
     const payload = {
-      tag_epc:      sinDraft.ppk,
-      proveedor_id: review.supplier.id,
+      tag_epc:      scannedEpc,
+      proveedor_id: scanData?.proveedor_id ?? scanData?.proveedorId ?? null,
       operador_id:  session?.user?.sub,
       resultado:    RESULTADO_BACKEND[decision],
-      defecto_tipos: types, // Cambiado a array
-      observacion:  sinDraft.notes,
+      defecto_tipo,
+      observacion,
       fecha:        new Date().toISOString(),
     };
 
-    // Agregamos el siniestro a la lista con estado "enviando"
-    const localId = Date.now();
-    setSiniestros((prev) => [
-      ...prev,
-      { id: localId, types, notes: sinDraft.notes, ppk: sinDraft.ppk, decision, sendStatus: 'sending' },
-    ]);
-    crearInspeccion(payload)
-      .then(() => {
-        setSiniestros((prev) => prev.map((s) =>
-          s.id === localId ? { ...s, sendStatus: 'sent' } : s
-        ));
-      })
-      .catch((err) => {
-        console.error('Error al registrar inspección:', err);
-        setSiniestros((prev) => prev.map((s) =>
-          s.id === localId ? { ...s, sendStatus: 'error', sendError: err.message } : s
-        ));
-      });
-
-    setSinStep(SINIESTRO_IDLE);
+    try {
+      await crearInspeccion(payload);
+      loadPendientes(); // refresca el contador (el backend lo decrementó)
+      setCounter((c) => c + 1);
+      reset();
+    } catch (err) {
+      console.error('Error al registrar inspección:', err);
+      setSubmitError(err.message);
+      setFlow(F_INSPECT);
+    }
   };
-  const cancelSiniestro = () => setSinStep(SINIESTRO_IDLE);
 
-  // ──────────────────────────────────────────────────────────────────
-  // EMPTY STATE — waiting for next cargo
-  // ──────────────────────────────────────────────────────────────────
-  if (!review) {
-    return (
-      <div className="px-8 py-5 max-w-[1400px] mx-auto">
-        <OperatorBar counterLabel="Revisión" counterValue={cycleNum} />
-
-        <PendientesPanel loading={pendientesLoading} pendientes={pendientes} />
-
-        <div className={
-          'p-10 text-center rounded-card border border-ink-100 shadow-card ' +
-          'bg-white dark:bg-ink-700 dark:border-ink-600 ' +
-          'animate-[fadeIn_.4s_ease]'
-        }>
-          <div className={
-            'w-[90px] h-[90px] mx-auto mb-5 rounded-full flex items-center justify-center ' +
-            'bg-blue-50 border-2 border-rfid ' +
-            'dark:bg-rfid/20 dark:border-rfid'
-          }>
-            <span className="text-4xl">📦</span>
-          </div>
-          <p className="text-base font-display font-medium text-ink-700 dark:text-ink-100 mb-1.5">
-            Esperando siguiente carga
-          </p>
-          <p className="text-xs text-ink-400 mb-7">
-            Presiona el botón cuando llegue un camión al andén
-          </p>
-          <button
-            onClick={startReview}
-            className={
-              'px-8 py-3.5 rounded-card font-display text-sm font-semibold text-white ' +
-              'bg-rfid border border-rfid hover:bg-blue-700 transition-colors ' +
-              'dark:hover:bg-blue-600'
-            }
-          >
-            Iniciar revisión — Siguiente carga
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  // ──────────────────────────────────────────────────────────────────
-  // ACTIVE REVIEW
-  // ──────────────────────────────────────────────────────────────────
-  const { supplier, profile, scenario } = review;
-  const rejected = siniestros.filter((s) => s.decision === 'reject').length;
-  const observed = siniestros.filter((s) => s.decision === 'pass').length;
-
+  // ─── Render ────────────────────────────────────────
   return (
     <div className="px-8 py-5 max-w-[1400px] mx-auto">
-      <OperatorBar counterLabel="Revisión" counterValue={cycleNum} />
+      <OperatorBar counterLabel="Escaneo" counterValue={counter} />
 
-      <div className="grid grid-cols-2 grid-rows-[auto_auto] gap-3.5 mb-3.5">
-
-        {/* ───── SECCIÓN 1 — Info del cargamento ───── */}
-        <SectionCard step="1" label="Info del cargamento" dot="blue">
-          {/* Supplier header */}
-          <div className="flex items-start justify-between mb-3">
-            <div className="min-w-0">
-              <div className="font-display text-base font-semibold text-ink-700 dark:text-ink-100 mb-0.5">
-                {supplier.name}
-              </div>
-              <div className="font-mono text-[11px] text-ink-400 mb-1.5 truncate">
-                {profile?.rfc || '—'} · {supplier.origin} · {scenario.po}
-              </div>
-              <NivelBadge level={supplier.level} color={supplier.color} />
-            </div>
-            <div className="text-right shrink-0 ml-3">
-              <div className="font-mono text-[28px] font-semibold text-amber-500 dark:text-amber-400 leading-none">
-                {supplier.stars.toFixed(1)}
-              </div>
-              <div className="mt-1 flex justify-end">
-                <Stars rating={supplier.stars} size={13} />
-              </div>
-            </div>
-          </div>
-
-          {/* Mini KPIs */}
-          <div className="grid grid-cols-3 gap-2 mb-3.5">
-            {[
-              { label: 'Total prepacks',   value: scenario.qty },
-              { label: 'Entregas previas', value: profile?.deliveries ?? '—' },
-              { label: 'Aprobación hist.', value: profile ? `${profile.approval}%` : '—' },
-            ].map((k) => (
-              <div
-                key={k.label}
-                className="px-2.5 py-2 rounded-card bg-ink-50 dark:bg-ink-600"
-              >
-                <div className="text-[9px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-0.5">
-                  {k.label}
-                </div>
-                <div className="font-mono text-base font-semibold text-ink-700 dark:text-ink-100">
-                  {k.value}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Cargo composition */}
-          <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-2">
-            Contenido del cargamento
-          </div>
-          {scenario.composition.map((c, i) => {
-            const p = PRODUCT_CATALOG.find((x) => x.id === c.productId) || { name: c.productId };
-            const colorCSS = COLOR_MAP[(c.color || '').toLowerCase()] || '#a855f7';
-            const esClaro = ['blanco', 'white', 'beige', 'amarillo'].includes((c.color || '').toLowerCase());
-            const isLast = i === scenario.composition.length - 1;
-            return (
-              <div
-                key={i}
-                className={
-                  'flex items-center gap-2.5 py-2 ' +
-                  (isLast ? '' : 'border-b border-ink-100 dark:border-ink-600')
-                }
-              >
-                <span
-                  className={
-                    'w-3.5 h-3.5 rounded-full shrink-0 border ' +
-                    (esClaro ? 'border-ink-200' : 'border-white/10')
-                  }
-                  style={{ background: colorCSS }}
-                />
-                <span className="flex-1 text-[13px] text-ink-700 dark:text-ink-100">
-                  {p.name}
-                  <span className="text-ink-400"> · {c.color} · {c.talla}</span>
-                </span>
-                <span className="font-mono text-[13px] font-semibold text-amber-500 dark:text-amber-400">
-                  {c.qty} prenda{c.qty !== 1 ? 's' : ''}
-                </span>
-              </div>
-            );
-          })}
-        </SectionCard>
-
-        {/* ───── SECCIÓN 2 — Muestreo requerido ───── */}
-        <SectionCard step="2" label="Muestreo requerido" dot="amber">
-          <div className="text-center pt-3 pb-4">
-            <div className="font-mono text-[64px] font-semibold leading-none mb-1.5 text-attention dark:text-attention-ring">
-              {review.sampleSize}
-            </div>
-            <div className="text-[13px] font-display font-medium text-ink-700 dark:text-ink-100 mb-1.5">
-              prepacks a revisar
-            </div>
-            <div className="text-[11px] text-ink-400 max-w-[260px] mx-auto">
-              {sampleHint(supplier.stars)}
-            </div>
-          </div>
-
-          <hr className="border-ink-100 dark:border-ink-600 my-3" />
-
-          <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-2.5">
-            Progreso
-          </div>
-          {[
-            { label: 'Defectos reportados',    value: siniestros.length, cls: 'text-ink-700 dark:text-ink-100' },
-            { label: 'Prepacks rechazados',    value: rejected,          cls: 'text-anomaly dark:text-anomaly-ring' },
-            { label: 'Pasados con observación', value: observed,         cls: 'text-attention dark:text-attention-ring' },
-          ].map((r, i, arr) => {
-            const isLast = i === arr.length - 1;
-            return (
-              <div
-                key={r.label}
-                className={
-                  'flex justify-between py-2 text-xs ' +
-                  (isLast ? '' : 'border-b border-ink-100 dark:border-ink-600')
-                }
-              >
-                <span className="text-ink-500 dark:text-ink-300">{r.label}</span>
-                <span className={'font-mono text-[15px] font-semibold ' + r.cls}>{r.value}</span>
-              </div>
-            );
-          })}
-
-          <div className={
-            'mt-3 px-3 py-2.5 rounded-card text-[11px] leading-relaxed ' +
-            'bg-blue-50 border border-rfid/30 text-ink-500 ' +
-            'dark:bg-rfid/10 dark:border-rfid/40 dark:text-ink-300'
-          }>
-            ⓘ Los prepacks sin reporte de siniestro se asumen como OK al finalizar la revisión.
-          </div>
-        </SectionCard>
-
-        {/* ───── SECCIÓN 3 — Captura de siniestros (full width) ───── */}
-        <div className="col-span-2">
-          <SectionCard step="3" label="Captura de siniestros" dot="red"
-            rightSlot={
-              <span className="ml-auto font-mono text-[11px] text-ink-400">
-                {siniestros.length} reportado(s)
-              </span>
-            }
-          >
-            {sinStep === SINIESTRO_IDLE && (
-              <SiniestroIdle
-                siniestros={siniestros}
-                onStart={startSiniestro}
-              />
-            )}
-
-            {sinStep === SINIESTRO_TYPE && (
-              <SiniestroType
-                sinDraft={sinDraft}
-                setSinDraft={setSinDraft}
-                onSelect={toggleType}
-                onBack={cancelSiniestro}
-                onNext={goToRfid}
-              />
-            )}
-
-            {sinStep === SINIESTRO_RFID && (
-              <SiniestroRfid
-                sinDraft={sinDraft}
-                rfidInput={rfidInput}
-                setRfidInput={setRfidInput}
-                rfidOk={rfidOk}
-                onBack={() => setSinStep(SINIESTRO_TYPE)}
-                onSimulate={simulateRfid}
-                onNext={goToDecide}
-              />
-            )}
-
-            {sinStep === SINIESTRO_DECIDE && (
-              <SiniestroDecide
-                sinDraft={sinDraft}
-                onBack={() => setSinStep(SINIESTRO_RFID)}
-                onFinalize={finalizeSiniestro}
-              />
-            )}
-          </SectionCard>
-        </div>
-      </div>
-
-      {/* ───── Footer — finish review ───── */}
-      <div className="flex items-center justify-between gap-5 px-4 py-3.5 bg-white border border-ink-100 rounded-card shadow-card dark:bg-ink-700 dark:border-ink-600">
-        <p className="flex-1 text-xs text-ink-500 dark:text-ink-300">
-          Cuando termines la inspección de la muestra, cierra la revisión para liberar la carga.
-        </p>
-        <button
-          onClick={finishReview}
-          className={
-            'shrink-0 px-6 py-3 rounded-card font-display text-sm font-semibold transition-colors ' +
-            'text-white bg-flow hover:bg-green-700'
-          }
-        >
-          Terminar revisión →
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════
-// SECTION CARD — wraps each of the 3 main sections
-// ════════════════════════════════════════════════════════════════════
-
-function SectionCard({ step, label, dot, rightSlot, children }) {
-  return (
-    <div className="bg-white border border-ink-100 rounded-card p-4 shadow-card dark:bg-ink-700 dark:border-ink-600">
-      <div className="flex items-center gap-1.5 mb-3.5 pb-2.5 border-b border-ink-100 dark:border-ink-600">
-        <span className={'w-2 h-2 rounded-full shrink-0 ' + (STEP_DOT_CLS[dot] || STEP_DOT_CLS.blue)} />
-        <span className="text-[10px] font-display font-semibold uppercase tracking-industrial text-ink-400">
-          {step}
-        </span>
-        <span className="text-[13px] font-display font-semibold text-ink-700 dark:text-ink-100">
-          {label}
-        </span>
-        {rightSlot}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════
-// SINIESTRO SUB-FLOW — 4 components for the 4 sub-states
-// ════════════════════════════════════════════════════════════════════
-
-function SiniestroIdle({ siniestros, onStart }) {
-  return (
-    <>
-      <button
-        onClick={onStart}
-        className={
-          'w-full p-6 text-center rounded-card transition-colors ' +
-          'bg-anomaly-bg border-2 border-dashed border-anomaly-ring ' +
-          'hover:bg-anomaly/15 ' +
-          'dark:bg-anomaly/15 dark:border-anomaly-ring dark:hover:bg-anomaly/25'
-        }
-      >
-        <div className="text-3xl mb-1">⚠️</div>
-        <div className="font-display text-[15px] font-semibold text-ink-700 dark:text-ink-100">
-          Reportar siniestro en prepack
-        </div>
-        <div className="text-[11px] text-ink-400 mt-1">
-          Captura defectos, roturas, calidad, etc.
-        </div>
-      </button>
-
-      {siniestros.length > 0 && (
-        <div className="mt-3.5">
-          <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-2">
-            Siniestros en esta carga
-          </div>
-          {siniestros.map((s) => {
-            const isReject = s.decision === 'reject';
-            const pillCls = isReject
-              ? 'bg-anomaly-bg text-anomaly border-anomaly-ring dark:bg-anomaly/20 dark:text-anomaly-ring dark:border-anomaly-ring/50'
-              : 'bg-attention-bg text-attention border-attention-ring dark:bg-attention/20 dark:text-attention-ring dark:border-attention-ring/50';
-            return (
-              <div
-                key={s.id}
-                className={
-                  'flex items-center gap-2.5 px-3 py-2.5 mb-1.5 ' +
-                  'bg-ink-50 border border-ink-100 rounded-card ' +
-                  'dark:bg-ink-600 dark:border-ink-500'
-                }
-              >
-                <span className="text-lg">{isReject ? '❌' : '⚠️'}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="font-mono text-xs font-semibold text-ink-700 dark:text-ink-100 truncate">
-                    {s.ppk}
-                  </div>
-                  <div className="flex flex-wrap gap-1 mt-1 mb-1">
-                    {s.types.map((type, i) => (
-                      <span key={i} className="inline-block text-[10px] px-1.5 py-0.5 rounded bg-anomaly/20 text-anomaly dark:bg-anomaly/30 dark:text-anomaly-ring font-semibold">
-                        {type}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="text-[11px] text-ink-400">
-                    {s.notes || 'Sin notas adicionales'}
-                  </div>
-                </div>
-                <span className={
-                  'text-[10px] font-display font-semibold px-2 py-0.5 rounded-md border uppercase tracking-wide shrink-0 ' +
-                  pillCls
-                }>
-                  {isReject ? 'Rechazado' : 'Pasó c/ obs'}
-                </span>
-                <SendStatus status={s.sendStatus} error={s.sendError} />
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </>
-  );
-}
-
-function SendStatus({ status, error }) {
-  if (status === 'sending') {
-    return (
-      <span
-        title="Enviando al servidor…"
-        className={
-          'inline-flex items-center gap-1 text-[10px] font-display font-semibold ' +
-          'px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
-          'bg-blue-50 text-rfid border-rfid/40 ' +
-          'dark:bg-rfid/20 dark:text-blue-300 dark:border-rfid/50'
-        }
-      >
-        <span className="w-2 h-2 rounded-full bg-rfid animate-pulse" />
-        Enviando
-      </span>
-    );
-  }
-  if (status === 'sent') {
-    return (
-      <span
-        title="Registrado en el backend"
-        className={
-          'inline-flex items-center gap-1 text-[10px] font-display font-semibold ' +
-          'px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
-          'bg-flow-bg text-flow border-flow-ring/40 ' +
-          'dark:bg-flow/20 dark:text-flow-ring dark:border-flow-ring/50'
-        }
-      >
-        ✓ Guardado
-      </span>
-    );
-  }
-  if (status === 'error') {
-    return (
-      <span
-        title={error || 'No se pudo registrar'}
-        className={
-          'inline-flex items-center gap-1 text-[10px] font-display font-semibold ' +
-          'px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
-          'bg-anomaly-bg text-anomaly border-anomaly-ring/40 ' +
-          'dark:bg-anomaly/20 dark:text-anomaly-ring dark:border-anomaly-ring/50'
-        }
-      >
-        ✕ Error
-      </span>
-    );
-  }
-  return null;
-}
-
-function SiniestroType({ sinDraft, setSinDraft, onSelect, onBack, onNext }) {
-  return (
-    <div className="animate-[fadeIn_.25s_ease]">
-      <StepHeader onBack={onBack} text="Paso 1 de 3 · Tipos de defecto" />
-
-      <div className="grid grid-cols-4 gap-2 mb-3">
-        {DEFECT_TYPES.map((d) => {
-          const selected = sinDraft.types.includes(d.cat);
-          return (
-            <button
-              key={d.cat}
-              onClick={() => onSelect(d.cat)}
-              className={
-                'flex flex-col items-center gap-1.5 px-2.5 py-3 rounded-card border text-xs font-medium transition-colors ' +
-                (selected
-                  ? 'bg-anomaly-bg border-anomaly-ring text-anomaly dark:bg-anomaly/20 dark:border-anomaly-ring dark:text-anomaly-ring'
-                  : 'bg-ink-50 border-ink-100 text-ink-500 hover:border-ink-200 ' +
-                    'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-300 dark:hover:border-ink-400')
-              }
-            >
-              <span className="text-xl">{d.icon}</span>
-              <span className="text-center leading-tight">{d.cat}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {sinDraft.types.includes('Otro (especificar)') && (
-        <div className="mb-3 animate-[fadeIn_.25s_ease]">
-          <label className="block text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-1">
-            Describe el problema
-          </label>
-          <textarea
-            value={sinDraft.otherText}
-            onChange={(e) => setSinDraft((d) => ({ ...d, otherText: e.target.value }))}
-            placeholder="Ej: pintura corrida en logo frontal..."
-            rows={2}
-            className={
-              'w-full px-3 py-2.5 rounded-card text-[13px] outline-none resize-y ' +
-              'bg-ink-50 border border-ink-100 text-ink-700 placeholder:text-ink-400 ' +
-              'focus:border-rfid ' +
-              'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-100'
-            }
-          />
-        </div>
+      {/* El panel de pendientes solo se muestra mientras esperamos un escaneo */}
+      {(flow === F_IDLE || flow === F_SCANNING) && (
+        <PendientesPanel loading={pendientesLoading} pendientes={pendientes} />
       )}
 
-      <div className="mb-3">
-        <label className="block text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-1">
-          Notas adicionales (opcional)
-        </label>
-        <textarea
-          value={sinDraft.notes}
-          onChange={(e) => setSinDraft((d) => ({ ...d, notes: e.target.value }))}
-          placeholder="Ubicación del defecto, severidad..."
-          rows={2}
-          className={
-            'w-full px-3 py-2.5 rounded-card text-[13px] outline-none resize-y ' +
-            'bg-ink-50 border border-ink-100 text-ink-700 placeholder:text-ink-400 ' +
-            'focus:border-rfid ' +
-            'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-100'
-          }
+      {flow === F_IDLE && (
+        <ScanCard
+          input={scanInput}
+          setInput={setScanInput}
+          onSimulate={handleSimulate}
+          onManual={handleManual}
+          error={scanError}
         />
-      </div>
+      )}
 
-      <button
-        onClick={onNext}
-        disabled={sinDraft.types.length === 0}
-        className={
-          'w-full px-3 py-3 rounded-card font-display text-[13px] font-semibold transition-colors ' +
-          (sinDraft.types.length > 0
-            ? 'bg-rfid text-white hover:bg-blue-700 cursor-pointer'
-            : 'bg-ink-100 text-ink-400 cursor-not-allowed dark:bg-ink-600 dark:text-ink-400')
-        }
-      >
-        Continuar al escaneo RFID →
-      </button>
-    </div>
-  );
-}
+      {flow === F_SCANNING && <ScanningCard epc={scanInput} />}
 
-function SiniestroRfid({ sinDraft, rfidInput, setRfidInput, rfidOk, onBack, onSimulate, onNext }) {
-  return (
-    <div className="animate-[fadeIn_.25s_ease]">
-      <StepHeader onBack={onBack} text="Paso 2 de 3 · Identificar prepack" />
+      {flow === F_PASA && (
+        <BigResultPasa epc={scannedEpc} onScanNext={handleScanNext} />
+      )}
 
-      <div className={
-        'p-6 text-center rounded-card border ' +
-        'bg-blue-50 border-rfid ' +
-        'dark:bg-rfid/15 dark:border-rfid'
-      }>
-        <div className="text-4xl mb-2.5">📡</div>
-        <div className="font-display text-[15px] font-semibold text-ink-700 dark:text-ink-100 mb-1">
-          Escanea el prepack con defecto
-        </div>
-        <div className="text-xs text-ink-500 dark:text-ink-300 mb-4">
-          Acerca el lector RFID al prepack que presenta:{' '}
-          <span className="font-mono text-anomaly dark:text-anomaly-ring">{sinDraft.types.join(', ')}</span>
-        </div>
-        <div className="max-w-[340px] mx-auto">
-          <input
-            type="text"
-            value={rfidInput}
-            onChange={(e) => setRfidInput(e.target.value)}
-            placeholder="Esperando lectura RFID..."
-            className={
-              'w-full px-3 py-2.5 rounded-card text-[13px] text-center outline-none font-mono ' +
-              'bg-white border border-ink-100 text-ink-700 placeholder:text-ink-400 ' +
-              'focus:border-rfid ' +
-              'dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100'
-            }
-          />
-          <button
-            onClick={onSimulate}
-            className="mt-2.5 px-4 py-2 rounded-card font-display text-xs font-semibold text-white bg-rfid hover:bg-blue-700 transition-colors"
-          >
-            Simular lectura RFID
-          </button>
-        </div>
-      </div>
+      {flow === F_REVISAR && (
+        <BigResultRevisar
+          epc={scannedEpc}
+          onCancel={handleScanNext}
+          onStartInspection={handleStartInspecting}
+        />
+      )}
 
-      {rfidOk && (
-        <div className="mt-3.5">
-          <div className={
-            'p-3.5 mb-3 text-center rounded-card border ' +
-            'bg-flow-bg border-flow-ring ' +
-            'dark:bg-flow/15 dark:border-flow-ring'
-          }>
-            <div className="text-xs font-display font-semibold text-flow dark:text-flow-ring mb-1">
-              ✓ PREPACK IDENTIFICADO
-            </div>
-            <div className="font-mono text-lg text-ink-700 dark:text-ink-100">
-              {sinDraft.ppk}
-            </div>
-          </div>
-          <button
-            onClick={onNext}
-            className="w-full px-3 py-3 rounded-card font-display text-[13px] font-semibold text-white bg-rfid hover:bg-blue-700 transition-colors"
-          >
-            Continuar a decisión →
-          </button>
-        </div>
+      {(flow === F_INSPECT || flow === F_SUBMIT) && (
+        <InspectionForm
+          epc={scannedEpc}
+          defectTypes={defectTypes}
+          onToggleDefect={toggleDefect}
+          otherText={otherText}
+          setOtherText={setOtherText}
+          notes={notes}
+          setNotes={setNotes}
+          onSubmit={handleSubmit}
+          onCancel={handleScanNext}
+          submitting={flow === F_SUBMIT}
+          error={submitError}
+        />
       )}
     </div>
   );
 }
 
-function SiniestroDecide({ sinDraft, onBack, onFinalize }) {
-  return (
-    <div className="animate-[fadeIn_.25s_ease]">
-      <StepHeader onBack={onBack} text="Paso 3 de 3 · Decisión final" />
-
-      <div className="px-3.5 py-3 mb-3 rounded-card bg-ink-50 border border-ink-100 dark:bg-ink-600 dark:border-ink-500">
-        <div className="flex justify-between py-1.5 text-xs border-b border-ink-100 dark:border-ink-500">
-          <span className="text-ink-400">Prepack</span>
-          <span className="font-mono font-medium text-ink-700 dark:text-ink-100">{sinDraft.ppk}</span>
-        </div>
-        <div className="py-1.5 text-xs">
-          <span className="text-ink-400">Defectos</span>
-          <div className="flex flex-wrap gap-1 mt-1">
-            {sinDraft.types.map((type, i) => (
-              <span key={i} className="inline-flex items-center px-2 py-1 text-[11px] font-semibold bg-anomaly-bg text-anomaly rounded-md border border-anomaly-ring dark:bg-anomaly/20 dark:text-anomaly-ring dark:border-anomaly-ring">
-                {type}
-              </span>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-2.5">
-        <button
-          onClick={() => onFinalize('reject')}
-          className={
-            'p-4 text-center rounded-card border-2 transition-colors ' +
-            'bg-white border-ink-100 hover:bg-anomaly-bg hover:border-anomaly-ring ' +
-            'dark:bg-ink-600 dark:border-ink-500 dark:hover:bg-anomaly/20 dark:hover:border-anomaly-ring'
-          }
-        >
-          <div className="text-2xl">❌</div>
-          <div className="mt-1 font-display text-[13px] font-semibold text-anomaly dark:text-anomaly-ring">
-            Rechazar
-          </div>
-          <div className="text-[10px] text-ink-400 mt-0.5">No entra al flujo</div>
-        </button>
-
-        <button
-          onClick={() => onFinalize('pass')}
-          className={
-            'p-4 text-center rounded-card border-2 transition-colors ' +
-            'bg-white border-ink-100 hover:bg-attention-bg hover:border-attention-ring ' +
-            'dark:bg-ink-600 dark:border-ink-500 dark:hover:bg-attention/20 dark:hover:border-attention-ring'
-          }
-        >
-          <div className="text-2xl">⚠️</div>
-          <div className="mt-1 font-display text-[13px] font-semibold text-attention dark:text-attention-ring">
-            Pasar con obs.
-          </div>
-          <div className="text-[10px] text-ink-400 mt-0.5">Entra con penalización</div>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function StepHeader({ onBack, text }) {
-  return (
-    <div className="flex items-center gap-2.5 mb-3.5 pb-2.5 border-b border-ink-100 dark:border-ink-600">
-      <button
-        onClick={onBack}
-        className={
-          'w-[30px] h-[30px] rounded-card flex items-center justify-center text-[15px] transition-colors ' +
-          'bg-ink-50 border border-ink-100 text-ink-500 hover:bg-ink-100 ' +
-          'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-300 dark:hover:bg-ink-500'
-        }
-      >
-        ←
-      </button>
-      <span className="text-[13px] font-display font-semibold text-ink-700 dark:text-ink-100">
-        {text}
-      </span>
-    </div>
-  );
-}
-
 // ════════════════════════════════════════════════════════════════════
-// PendientesPanel — muestra cuántas revisiones le quedan a cada proveedor
+// PENDIENTES PANEL
 // ════════════════════════════════════════════════════════════════════
 
 function PendientesPanel({ loading, pendientes }) {
@@ -837,17 +262,14 @@ function PendientesPanel({ loading, pendientes }) {
               </div>
             </div>
 
-            {p.level && p.color && (
-              <NivelBadge level={p.level} color={p.color} />
-            )}
+            {p.level && p.color && <NivelBadge level={p.level} color={p.color} />}
 
             <div className="text-right shrink-0 min-w-[110px]">
               <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-0.5">
                 Pendientes
               </div>
               <span className={
-                'inline-flex items-center justify-center px-2.5 py-0.5 rounded-md border ' +
-                'font-mono text-base font-semibold ' +
+                'inline-flex items-center justify-center px-2.5 py-0.5 rounded-md border font-mono text-base font-semibold ' +
                 countCls
               }>
                 {p.restantes}
@@ -857,5 +279,374 @@ function PendientesPanel({ loading, pendientes }) {
         );
       })}
     </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SCAN CARD — input + simulate button (estado idle)
+// ════════════════════════════════════════════════════════════════════
+
+function ScanCard({ input, setInput, onSimulate, onManual, error }) {
+  return (
+    <div className={
+      'p-10 text-center rounded-card border border-ink-100 shadow-card ' +
+      'bg-white dark:bg-ink-700 dark:border-ink-600 ' +
+      'animate-[fadeIn_.4s_ease]'
+    }>
+      <div className={
+        'w-[90px] h-[90px] mx-auto mb-5 rounded-full flex items-center justify-center ' +
+        'bg-blue-50 border-2 border-rfid ' +
+        'dark:bg-rfid/20 dark:border-rfid'
+      }>
+        <span className="text-4xl">📡</span>
+      </div>
+      <p className="text-base font-display font-medium text-ink-700 dark:text-ink-100 mb-1.5">
+        Escanea un prepack
+      </p>
+      <p className="text-xs text-ink-400 mb-5">
+        El sistema decidirá si requiere inspección o pasa directo
+      </p>
+
+      <div className="max-w-[420px] mx-auto">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') onManual(); }}
+          placeholder="EPC del prepack…"
+          className={
+            'w-full px-3 py-2.5 mb-2.5 rounded-card text-[13px] text-center outline-none font-mono ' +
+            'bg-ink-50 border border-ink-100 text-ink-700 placeholder:text-ink-400 ' +
+            'focus:border-rfid ' +
+            'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-100'
+          }
+        />
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            onClick={onManual}
+            disabled={!input.trim()}
+            className={
+              'px-4 py-3 rounded-card font-display text-sm font-semibold transition-colors ' +
+              'bg-ink-100 text-ink-700 hover:bg-ink-200 disabled:opacity-50 disabled:cursor-not-allowed ' +
+              'dark:bg-ink-600 dark:text-ink-100 dark:hover:bg-ink-500'
+            }
+          >
+            Escanear EPC
+          </button>
+          <button
+            onClick={onSimulate}
+            className={
+              'px-4 py-3 rounded-card font-display text-sm font-semibold text-white ' +
+              'bg-rfid hover:bg-blue-700 transition-colors dark:hover:bg-blue-600'
+            }
+          >
+            Simular lectura
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className={
+          'max-w-[420px] mx-auto mt-4 p-3 rounded-card text-xs ' +
+          'bg-anomaly-bg border border-anomaly-ring text-anomaly ' +
+          'dark:bg-anomaly/15 dark:border-anomaly-ring dark:text-anomaly-ring'
+        }>
+          {error}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SCANNING CARD — feedback mientras el POST viaja
+// ════════════════════════════════════════════════════════════════════
+
+function ScanningCard({ epc }) {
+  return (
+    <div className={
+      'p-10 text-center rounded-card border border-ink-100 shadow-card ' +
+      'bg-white dark:bg-ink-700 dark:border-ink-600'
+    }>
+      <div className={
+        'w-[90px] h-[90px] mx-auto mb-5 rounded-full flex items-center justify-center ' +
+        'bg-blue-50 border-2 border-rfid animate-pulse ' +
+        'dark:bg-rfid/20 dark:border-rfid'
+      }>
+        <span className="text-4xl">📡</span>
+      </div>
+      <p className="text-base font-display font-medium text-ink-700 dark:text-ink-100 mb-1.5">
+        Consultando con el sistema…
+      </p>
+      <p className="font-mono text-xs text-ink-400">{epc}</p>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// BIG RESULT — PASA (no inspeccionar) — VERDE GRANDE
+// ════════════════════════════════════════════════════════════════════
+
+function BigResultPasa({ epc, onScanNext }) {
+  return (
+    <div className={
+      'p-12 text-center rounded-card border-4 shadow-card animate-[fadeIn_.3s_ease] ' +
+      'bg-flow-bg border-flow-ring ' +
+      'dark:bg-flow/15 dark:border-flow-ring'
+    }>
+      <div className="text-8xl mb-2 leading-none">✓</div>
+      <div className="font-display text-[96px] font-bold tracking-tight leading-none mb-3 text-flow dark:text-flow-ring">
+        PASA
+      </div>
+      <div className="text-base font-display font-medium text-ink-700 dark:text-ink-100 mb-2">
+        Este prepack NO requiere inspección
+      </div>
+      <div className="font-mono text-xs text-ink-500 dark:text-ink-300 mb-7">
+        {epc}
+      </div>
+      <button
+        onClick={onScanNext}
+        className={
+          'px-8 py-3.5 rounded-card font-display text-sm font-semibold text-white ' +
+          'bg-rfid border border-rfid hover:bg-blue-700 transition-colors ' +
+          'dark:hover:bg-blue-600'
+        }
+      >
+        Escanear siguiente prepack →
+      </button>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// BIG RESULT — REVISAR (inspeccionar) — ÁMBAR GRANDE
+// ════════════════════════════════════════════════════════════════════
+
+function BigResultRevisar({ epc, onCancel, onStartInspection }) {
+  return (
+    <div className={
+      'p-12 text-center rounded-card border-4 shadow-card animate-[fadeIn_.3s_ease] ' +
+      'bg-attention-bg border-attention-ring ' +
+      'dark:bg-attention/15 dark:border-attention-ring'
+    }>
+      <div className="text-8xl mb-2 leading-none">⚠️</div>
+      <div className="font-display text-[96px] font-bold tracking-tight leading-none mb-3 text-attention dark:text-attention-ring">
+        REVISAR
+      </div>
+      <div className="text-base font-display font-medium text-ink-700 dark:text-ink-100 mb-2">
+        Este prepack REQUIERE inspección manual
+      </div>
+      <div className="font-mono text-xs text-ink-500 dark:text-ink-300 mb-7">
+        {epc}
+      </div>
+      <div className="flex justify-center gap-3">
+        <button
+          onClick={onCancel}
+          className={
+            'px-6 py-3 rounded-card font-display text-sm font-semibold transition-colors ' +
+            'bg-white border border-ink-200 text-ink-700 hover:bg-ink-50 ' +
+            'dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100 dark:hover:bg-ink-600'
+          }
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={onStartInspection}
+          className={
+            'px-8 py-3 rounded-card font-display text-sm font-semibold text-white ' +
+            'bg-attention border border-attention-ring hover:opacity-90 transition-opacity'
+          }
+        >
+          Iniciar inspección →
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// INSPECTION FORM — captura defectos + decisión, dispara POST
+// ════════════════════════════════════════════════════════════════════
+
+function InspectionForm({
+  epc, defectTypes, onToggleDefect, otherText, setOtherText, notes, setNotes,
+  onSubmit, onCancel, submitting, error,
+}) {
+  const hasOther = defectTypes.includes('Otro (especificar)');
+  const hasDefects = defectTypes.length > 0;
+
+  return (
+    <div className={
+      'animate-[fadeIn_.3s_ease] bg-white border border-ink-100 rounded-card p-6 shadow-card ' +
+      'dark:bg-ink-700 dark:border-ink-600'
+    }>
+      {/* Header — EPC + back */}
+      <div className="flex items-center justify-between mb-4 pb-3 border-b border-ink-100 dark:border-ink-600">
+        <div>
+          <div className="text-[10px] font-display font-semibold uppercase tracking-industrial text-attention dark:text-attention-ring mb-0.5">
+            Inspección manual
+          </div>
+          <div className="font-mono text-sm text-ink-700 dark:text-ink-100">{epc}</div>
+        </div>
+        <button
+          onClick={onCancel}
+          disabled={submitting}
+          className={
+            'text-xs px-3 py-1.5 rounded-card transition-colors ' +
+            'bg-ink-50 border border-ink-100 text-ink-500 hover:bg-ink-100 ' +
+            'disabled:opacity-50 ' +
+            'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-300 dark:hover:bg-ink-500'
+          }
+        >
+          ← Volver
+        </button>
+      </div>
+
+      {/* Defect types */}
+      <div className="mb-4">
+        <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-2">
+          Tipos de defecto (déjalo vacío si la inspección sale OK)
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {DEFECT_TYPES.map((d) => {
+            const selected = defectTypes.includes(d.cat);
+            return (
+              <button
+                key={d.cat}
+                type="button"
+                onClick={() => onToggleDefect(d.cat)}
+                disabled={submitting}
+                className={
+                  'flex flex-col items-center gap-1.5 px-2.5 py-3 rounded-card border text-xs font-medium transition-colors ' +
+                  'disabled:opacity-50 ' +
+                  (selected
+                    ? 'bg-anomaly-bg border-anomaly-ring text-anomaly dark:bg-anomaly/20 dark:border-anomaly-ring dark:text-anomaly-ring'
+                    : 'bg-ink-50 border-ink-100 text-ink-500 hover:border-ink-200 ' +
+                      'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-300 dark:hover:border-ink-400')
+                }
+              >
+                <span className="text-xl">{d.icon}</span>
+                <span className="text-center leading-tight">{d.cat}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {hasOther && (
+        <div className="mb-4 animate-[fadeIn_.25s_ease]">
+          <label className="block text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-1">
+            Describe el otro defecto
+          </label>
+          <textarea
+            value={otherText}
+            onChange={(e) => setOtherText(e.target.value)}
+            disabled={submitting}
+            placeholder="Ej: pintura corrida en logo frontal…"
+            rows={2}
+            className={
+              'w-full px-3 py-2.5 rounded-card text-[13px] outline-none resize-y ' +
+              'bg-ink-50 border border-ink-100 text-ink-700 placeholder:text-ink-400 ' +
+              'focus:border-rfid ' +
+              'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-100'
+            }
+          />
+        </div>
+      )}
+
+      <div className="mb-5">
+        <label className="block text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-1">
+          Observaciones (opcional)
+        </label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          disabled={submitting}
+          placeholder="Ubicación del defecto, severidad, condiciones…"
+          rows={3}
+          className={
+            'w-full px-3 py-2.5 rounded-card text-[13px] outline-none resize-y ' +
+            'bg-ink-50 border border-ink-100 text-ink-700 placeholder:text-ink-400 ' +
+            'focus:border-rfid ' +
+            'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-100'
+          }
+        />
+      </div>
+
+      {error && (
+        <div className={
+          'mb-4 p-3 rounded-card text-xs ' +
+          'bg-anomaly-bg border border-anomaly-ring text-anomaly ' +
+          'dark:bg-anomaly/15 dark:border-anomaly-ring dark:text-anomaly-ring'
+        }>
+          {error}
+        </div>
+      )}
+
+      {/* Decisión final */}
+      <div className="grid grid-cols-3 gap-3">
+        <DecisionButton
+          icon="✓"
+          label="Aprobar"
+          hint="Sin defectos"
+          tone="flow"
+          onClick={() => onSubmit('approve')}
+          disabled={submitting}
+        />
+        <DecisionButton
+          icon="⚠️"
+          label="Observado"
+          hint="Pasa con penalización"
+          tone="attention"
+          onClick={() => onSubmit('observe')}
+          disabled={submitting || !hasDefects}
+        />
+        <DecisionButton
+          icon="✕"
+          label="Rechazar"
+          hint="No entra al flujo"
+          tone="anomaly"
+          onClick={() => onSubmit('reject')}
+          disabled={submitting || !hasDefects}
+        />
+      </div>
+
+      {submitting && (
+        <div className="mt-4 text-center text-xs text-ink-400 animate-pulse">
+          Registrando inspección…
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DecisionButton({ icon, label, hint, tone, onClick, disabled }) {
+  const toneCls = {
+    flow:      'border-flow-ring/40 hover:bg-flow-bg dark:border-flow-ring/40 dark:hover:bg-flow/20',
+    attention: 'border-attention-ring/40 hover:bg-attention-bg dark:border-attention-ring/40 dark:hover:bg-attention/20',
+    anomaly:   'border-anomaly-ring/40 hover:bg-anomaly-bg dark:border-anomaly-ring/40 dark:hover:bg-anomaly/20',
+  }[tone];
+  const textCls = {
+    flow:      'text-flow dark:text-flow-ring',
+    attention: 'text-attention dark:text-attention-ring',
+    anomaly:   'text-anomaly dark:text-anomaly-ring',
+  }[tone];
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={
+        'p-5 text-center rounded-card border-2 transition-colors ' +
+        'bg-white dark:bg-ink-600 ' +
+        toneCls + ' ' +
+        'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-ink-600'
+      }
+    >
+      <div className="text-3xl mb-1">{icon}</div>
+      <div className={'font-display text-sm font-semibold ' + textCls}>{label}</div>
+      <div className="text-[10px] text-ink-400 mt-0.5">{hint}</div>
+    </button>
   );
 }

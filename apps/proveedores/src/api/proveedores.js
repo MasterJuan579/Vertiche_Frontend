@@ -29,6 +29,29 @@ export async function fetchPendientes() {
 }
 
 /**
+ * Pregunta al backend si un prepack (por su EPC) debe inspeccionarse o no.
+ * El backend responde "REVISAR" o "PASA". Aceptamos tanto la respuesta como
+ * string crudo o como objeto envolvente para mantener flexibilidad.
+ */
+export async function escanearPrepack(epc) {
+  const res = await fetch(`${API_URL}/PlanQA/escanear`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ epc }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = await res.text();
+      detail = body ? ` — ${body}` : '';
+    } catch {}
+    console.error('escanearPrepack response:', res.status, detail);
+    throw new Error(`Error ${res.status} al escanear prepack${detail}`);
+  }
+  return res.json();
+}
+
+/**
  * Registra una inspección QA (un siniestro reportado contra un prepack).
  *
  * Payload esperado:
