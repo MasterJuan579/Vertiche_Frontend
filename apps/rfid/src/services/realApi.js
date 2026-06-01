@@ -1,7 +1,13 @@
 // rfid/src/services/realApi.js
 // Cliente HTTP centralizado. Propaga errores con mensaje real del backend.
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+// Prioridad de variables: VITE_API_URL es la que usan los demás módulos del
+// monorepo (shell, sorter, dashboard, design-system). VITE_API_BASE_URL queda
+// como alias por compatibilidad con .env locales existentes.
+const API_BASE =
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  'http://localhost:8080';
 
 /**
  * Lee el token guardado por @vertiche/design-system (auth.jsx) en sessionStorage.
