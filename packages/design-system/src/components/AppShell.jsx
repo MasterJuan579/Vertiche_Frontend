@@ -1,5 +1,15 @@
 import { NavLink } from 'react-router-dom';
 import { ThemeToggle } from './ThemeToggle.jsx';
+import { useAuth } from '../auth.jsx';
+
+// All modules, for the ADMIN switcher. Accents mirror each module's own ACCENT.
+const ALL_MODULES = [
+  { to: '/rfid', label: 'Supervisión RFID', accent: '#1E40AF' },
+  { to: '/sorter', label: 'Sorter & Bahía', accent: '#7C3AED' },
+  { to: '/dashboard', label: 'Dashboard', accent: '#0F766E' },
+  { to: '/proveedores', label: 'Calidad Proveedores', accent: '#C2410C' },
+  { to: '/admin', label: 'Admin', accent: '#475569' },
+];
 
 export function AppShell({
   moduleName,
@@ -9,6 +19,11 @@ export function AppShell({
   onLogout,
   children,
 }) {
+  // The real session role, used to gate the admin-only module switcher. Note
+  // this differs from `user.role`, which is the hardcoded display label.
+  const { session } = useAuth();
+  const isAdmin = session?.user?.role === 'ADMIN';
+
   return (
     <div className="min-h-screen bg-ink-50 dark:bg-ink-900 flex">
       {/* Sidebar */}
@@ -60,6 +75,32 @@ export function AppShell({
           ))}
         </nav>
 
+        {/* Admin-only module switcher (A1) — sits between the per-module nav
+            and the user block. Non-admins never see it. */}
+        {isAdmin && (
+          <div className="px-2 pb-4 border-t border-ink-100 dark:border-ink-600 pt-3">
+            <div className="px-3 mb-1 text-[10px] text-ink-400 dark:text-ink-300 uppercase tracking-industrial font-display font-semibold">
+              Cambiar módulo
+            </div>
+            {ALL_MODULES.map((mod) => (
+              <NavLink
+                key={mod.to}
+                to={mod.to}
+                className={({ isActive }) =>
+                  `flex items-center gap-2.5 px-3 py-2 rounded-card text-sm font-medium mb-0.5 transition-colors ${
+                    isActive
+                      ? 'bg-ink-50 dark:bg-ink-600 text-ink-700 dark:text-ink-100'
+                      : 'text-ink-400 dark:text-ink-300 hover:text-ink-700 dark:hover:text-ink-100 hover:bg-ink-50 dark:hover:bg-ink-600'
+                  }`
+                }
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ background: mod.accent }} />
+                {mod.label}
+              </NavLink>
+            ))}
+          </div>
+        )}
+
         {/* User block */}
         {user && (
           <div className="border-t border-ink-100 px-4 py-3 dark:border-ink-700">
@@ -69,7 +110,7 @@ export function AppShell({
                   {user.name}
                 </div>
                 <div className="text-[10px] text-ink-400 dark:text-ink-300 uppercase tracking-industrial font-display font-medium mt-0.5">
-                  {user.role}
+                  {isAdmin ? 'Administrador · viendo módulo' : user.role}
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">

@@ -390,7 +390,9 @@ export function RequireRole({ role, children }) {
     return <Navigate to="/" replace />;
   }
 
-  if (session.user.role !== role) {
+  // ADMIN is a superuser and may enter any module. Everyone else is locked to
+  // their own module. The backend (requireRole) is the real gate; this is UX.
+  if (session.user.role !== role && session.user.role !== 'ADMIN') {
     const home = ROLE_HOMES[session.user.role] || '/';
     return <Navigate to={home} replace />;
   }
