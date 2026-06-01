@@ -13,14 +13,16 @@ import { onSocket } from '../services/socketClient.js';
 const ETAPAS_ORDEN = ['PREREGISTRO', 'QA', 'REGISTRO', 'SORTER', 'BAHIA', 'AUDITORIA', 'ENVIO'];
 
 /**
- * Mapeo de la etapa del EventoLectura del backend (RECEPCION, QA, SORTING, PACKING, SALIDA)
+ * Mapeo de la etapa del EventoLectura del backend (las 7 etapas físicas con lector)
  * al label del Gantt visual (PREREGISTRO, QA, REGISTRO, SORTER, BAHIA, AUDITORIA, ENVIO).
  */
 const ETAPA_BACKEND_TO_GANTT = {
   RECEPCION: 'PREREGISTRO',
   QA:        'QA',
+  REGISTRO:  'REGISTRO',
   SORTING:   'SORTER',
   PACKING:   'BAHIA',
+  AUDITORIA: 'AUDITORIA',
   SALIDA:    'ENVIO',
 };
 

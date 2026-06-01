@@ -19,17 +19,21 @@ const ZONA_ACCENT = { BAHIA: '#0891B2', AUDITORIA: '#DB2777', ENVIO: '#16A34A' }
 
 /**
  * Mapeo del enum DB `Tag.etapa_actual` a la etapa visual del Gantt.
- * El esquema MySQL guarda EstadoPrepack: REGISTRADO, EN_QA, APROBADO, RECHAZADO, EN_CAJA, ENVIADO.
+ * El esquema MySQL guarda EstadoPrepack:
+ *   REGISTRADO, EN_QA, APROBADO, EN_SORTING, EN_CAJA, EN_AUDITORIA, RECHAZADO, ENVIADO.
+ * Hay un lector RFID físico en cada etapa, así que cada estado tiene su columna.
  * El Gantt visual usa: PREREGISTRO, QA, REGISTRO, SORTER, BAHIA, AUDITORIA, ENVIO.
  * Un tag aparece SOLO en la etapa donde está actualmente, no en las anteriores.
  */
 const ETAPA_DB_TO_GANTT = {
-  REGISTRADO: 'PREREGISTRO',
-  EN_QA:      'QA',
-  APROBADO:   'REGISTRO',
-  RECHAZADO:  'QA',
-  EN_CAJA:    'BAHIA',
-  ENVIADO:    'ENVIO',
+  REGISTRADO:   'PREREGISTRO',
+  EN_QA:        'QA',
+  APROBADO:     'REGISTRO',
+  EN_SORTING:   'SORTER',
+  EN_CAJA:      'BAHIA',
+  EN_AUDITORIA: 'AUDITORIA',
+  RECHAZADO:    'QA',
+  ENVIADO:      'ENVIO',
 };
 
 export function FlujoCEDIS() {
