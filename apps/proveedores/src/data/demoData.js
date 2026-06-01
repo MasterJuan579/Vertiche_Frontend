@@ -189,16 +189,30 @@ export const DEFECT_TYPES = [
   { cat: 'Otro (especificar)',      icon: '✏️' },
 ];
 
-// EPCs reales del demo RFID (mismos que rfid y sorter)
+// EPCs reales seedeados en la tabla Tag del backend (DEV).
+// Se eligen de aquí en orden secuencial cuando el inspector simula una
+// lectura RFID, por lo que cada uno debe existir como fila en `Tag.epc`
+// para que la FK de InspeccionQA.tag_epc resuelva sin romper.
 export const MOCK_EPCS = [
-  'E001A', 'E001B', 'E001C',
-  'E005B', 'E005C',
-  'E006A', 'E006B',
-  'E007A', 'E007B',
-  'E008A', 'E008B', 'E008C',
-  'E012A', 'E012B', 'E012C',
-  'E018A', 'E018B', 'E018C',
-  'E022A', 'E022B', 'E022C',
+  'E2801160200000000000A001',
+  'E2801160200000000000A002',
+  'E2801160200000000000A003',
+  'E2801160200000000000A004',
+  'E2801160200000000000A005',
+  'E2801160200000000000B001',
+  'E2801160200000000000B002',
+  'E2801160200000000000B003',
+  'E2801160200000000000B004',
+  'E2801160200000000000C003',
+  'E2801160200000000000D001',
+  'E2801160200000000000D002',
+  'E2801160200000000000D003',
+  'E2801160200000000000D004',
+  'E2801160200000000000D005',
+  'E2801160200000000000E001',
+  'E2801160200000000000E002',
+  'E2801160200000000000E003',
+  'E2801160200000000000F001',
 ];
 
 /**

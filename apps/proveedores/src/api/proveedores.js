@@ -14,3 +14,32 @@ export async function fetchProveedores() {
   }
   return res.json();
 }
+
+/**
+ * Registra una inspección QA (un siniestro reportado contra un prepack).
+ *
+ * Payload esperado:
+ *   tag_epc, proveedor_id, operador_id, resultado ('RECHAZADO' | 'OBSERVADO'),
+ *   defecto_tipo, observacion, fecha (ISO string)
+ */
+export async function crearInspeccion(payload) {
+  const res = await fetch(`${API_URL}/InspeccionQA/crearInspeccion`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    // Intenta extraer el mensaje del backend para diagnosticar
+    let detail = '';
+    try {
+      const body = await res.text();
+      detail = body ? ` — ${body}` : '';
+    } catch {
+      // si no se puede leer el body, seguimos con el status nada más
+    }
+    console.error('crearInspeccion payload:', payload);
+    console.error('crearInspeccion response:', res.status, detail);
+    throw new Error(`Error ${res.status} al registrar inspección${detail}`);
+  }
+  return res.json();
+}

@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useAuth } from '@vertiche/design-system';
 import { OperatorBar } from '../components/OperatorBar.jsx';
 import { NivelBadge } from '../components/NivelBadge.jsx';
 import { Stars } from '../components/Stars.jsx';
+import { crearInspeccion } from '../api/proveedores.js';
 import {
   CARGO_SCENARIOS,
   PRODUCT_CATALOG,
@@ -13,6 +15,12 @@ import {
   calcSampleSize,
   sampleHint,
 } from '../data/demoData.js';
+
+// Mapea la decisión interna de la UI al enum que espera el backend.
+const RESULTADO_BACKEND = {
+  reject: 'RECHAZADO',
+  pass:   'OBSERVADO',
+};
 
 /**
  * QA inspector's main screen. Cycles through CARGO_SCENARIOS to simulate
@@ -41,6 +49,7 @@ const STEP_DOT_CLS = {
 };
 
 export function OperatorScreen() {
+  const { session } = useAuth();
   const [review, setReview]         = useState(null);
   const [siniestros, setSiniestros] = useState([]);
   const [reviewRating, setReviewRating] = useState(null);
@@ -97,10 +106,40 @@ export function OperatorScreen() {
     const type = sinDraft.type === 'Otro (especificar)' && sinDraft.otherText
       ? sinDraft.otherText
       : sinDraft.type;
+
+    // Payload para el backend. tag_epc, proveedor_id, operador_id y fecha
+    // se derivan del contexto; los 3 campos capturados por el inspector son
+    // resultado, defecto_tipo y observacion.
+    const payload = {
+      tag_epc:      sinDraft.ppk,
+      proveedor_id: review.supplier.id,
+      operador_id:  session?.user?.sub,
+      resultado:    RESULTADO_BACKEND[decision],
+      defecto_tipo: type,
+      observacion:  sinDraft.notes,
+      fecha:        new Date().toISOString(),
+    };
+
+    // Agregamos el siniestro a la lista con estado "enviando" y luego
+    // actualizamos su sendStatus según la respuesta del backend.
+    const localId = Date.now();
     setSiniestros((prev) => [
       ...prev,
-      { id: Date.now(), type, notes: sinDraft.notes, ppk: sinDraft.ppk, decision },
+      { id: localId, type, notes: sinDraft.notes, ppk: sinDraft.ppk, decision, sendStatus: 'sending' },
     ]);
+    crearInspeccion(payload)
+      .then(() => {
+        setSiniestros((prev) => prev.map((s) =>
+          s.id === localId ? { ...s, sendStatus: 'sent' } : s
+        ));
+      })
+      .catch((err) => {
+        console.error('Error al registrar inspección:', err);
+        setSiniestros((prev) => prev.map((s) =>
+          s.id === localId ? { ...s, sendStatus: 'error', sendError: err.message } : s
+        ));
+      });
+
     setSinStep(SINIESTRO_IDLE);
   };
   const cancelSiniestro = () => setSinStep(SINIESTRO_IDLE);
@@ -475,6 +514,7 @@ function SiniestroIdle({ siniestros, onStart }) {
                 }>
                   {isReject ? 'Rechazado' : 'Pasó c/ obs'}
                 </span>
+                <SendStatus status={s.sendStatus} error={s.sendError} />
               </div>
             );
           })}
@@ -482,6 +522,56 @@ function SiniestroIdle({ siniestros, onStart }) {
       )}
     </>
   );
+}
+
+function SendStatus({ status, error }) {
+  if (status === 'sending') {
+    return (
+      <span
+        title="Enviando al servidor…"
+        className={
+          'inline-flex items-center gap-1 text-[10px] font-display font-semibold ' +
+          'px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
+          'bg-blue-50 text-rfid border-rfid/40 ' +
+          'dark:bg-rfid/20 dark:text-blue-300 dark:border-rfid/50'
+        }
+      >
+        <span className="w-2 h-2 rounded-full bg-rfid animate-pulse" />
+        Enviando
+      </span>
+    );
+  }
+  if (status === 'sent') {
+    return (
+      <span
+        title="Registrado en el backend"
+        className={
+          'inline-flex items-center gap-1 text-[10px] font-display font-semibold ' +
+          'px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
+          'bg-flow-bg text-flow border-flow-ring/40 ' +
+          'dark:bg-flow/20 dark:text-flow-ring dark:border-flow-ring/50'
+        }
+      >
+        ✓ Guardado
+      </span>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <span
+        title={error || 'No se pudo registrar'}
+        className={
+          'inline-flex items-center gap-1 text-[10px] font-display font-semibold ' +
+          'px-2 py-0.5 rounded-md border uppercase tracking-wide ' +
+          'bg-anomaly-bg text-anomaly border-anomaly-ring/40 ' +
+          'dark:bg-anomaly/20 dark:text-anomaly-ring dark:border-anomaly-ring/50'
+        }
+      >
+        ✕ Error
+      </span>
+    );
+  }
+  return null;
 }
 
 function SiniestroType({ sinDraft, setSinDraft, onSelect, onBack, onNext }) {
