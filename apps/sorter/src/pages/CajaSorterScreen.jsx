@@ -1,9 +1,6 @@
-import { useCallback, useState } from 'react';
-import {
-  BAY_COLORS,
-  DEMO_BAY_ID,
-  getPrepacksForDemoBay,
-} from '../data/demoData.js';
+import { useEffect, useState } from 'react';
+import { BAY_COLORS } from '../data/demoData.js';
+import { connectRealtime } from '../api/rfid.js';
 import { IconScan, IconSigma, IconBolt } from '../components/Icons.jsx';
 
 function fmtTime(ts) {
@@ -12,30 +9,44 @@ function fmtTime(ts) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+function scanToPrepack(payload) {
+  return {
+    ...payload,
+    id: `${payload.epc}-${payload.timestamp || Date.now()}`,
+    scannedAt: payload.timestamp ? new Date(payload.timestamp).getTime() : Date.now(),
+    correctBay: payload.bahiaActual,
+    bayNumber: payload.bahiaActual,
+    orden_id: payload.orden_id,
+    producto: payload.producto,
+  };
+}
+
 export function CajaSorterScreen() {
-  const demoPrepacks = getPrepacksForDemoBay();
   const [current, setCurrent] = useState(null);
   const [history, setHistory] = useState([]);
-  const [cursor, setCursor] = useState(0);
-  const [scanning, setScanning] = useState(false);
+  const [connected, setConnected] = useState(false);
 
-  const handleScan = useCallback(() => {
-    if (scanning) return;
-    setScanning(true);
-    const prepack = demoPrepacks[cursor % demoPrepacks.length];
-    const scan = {
-      ...prepack,
-      id: `${prepack.epc}-${Date.now()}`,
-      scannedAt: Date.now(),
+  useEffect(() => {
+    let socket;
+    let cancelled = false;
+    connectRealtime({
+      connect: () => { if (!cancelled) setConnected(true); },
+      disconnect: () => { if (!cancelled) setConnected(false); },
+      'sorter-caja-scan': (payload) => {
+        if (cancelled) return;
+        const scan = scanToPrepack(payload);
+        setCurrent(scan);
+        setHistory((prev) => [scan, ...prev].slice(0, 18));
+      },
+    }).then((s) => { socket = s; }).catch(() => setConnected(false));
+    return () => {
+      cancelled = true;
+      if (socket) socket.disconnect();
     };
-    setCurrent(scan);
-    setHistory((prev) => [scan, ...prev].slice(0, 18));
-    setCursor((c) => c + 1);
-    setTimeout(() => setScanning(false), 300);
-  }, [cursor, demoPrepacks, scanning]);
+  }, []);
 
   const bayColor = current
-    ? BAY_COLORS[current.correctBay] || '#6b7280'
+    ? BAY_COLORS[current.bahiaActual] || '#6b7280'
     : '#6b7280';
 
   return (
@@ -43,10 +54,10 @@ export function CajaSorterScreen() {
       <header className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-3 min-h-14 border-b border-ink-100 shrink-0 bg-white dark:bg-ink-700 dark:border-ink-600">
         <div className="flex-1 min-w-0">
           <div className="font-display text-sm font-semibold text-ink-700 dark:text-ink-100">
-            Arco RFID post-sorter - Bahia {DEMO_BAY_ID} a Caja
+            Arco RFID post-sorter - Bahia a Caja
           </div>
           <div className="font-mono text-[10px] uppercase tracking-industrial text-ink-400 truncate">
-            Demo fija: el prepack ya cayo en Bahia {DEMO_BAY_ID}; este arco decide la caja
+            El backend recibe el EPC y resuelve la caja destino
           </div>
         </div>
 
@@ -57,7 +68,7 @@ export function CajaSorterScreen() {
           </Metric>
 
           <Metric icon={<IconBolt size={14} color="currentColor" />} colorCls="text-rfid dark:text-blue-300">
-            <span className="font-mono text-base font-bold leading-none">Demo</span>
+            <span className="font-mono text-base font-bold leading-none">{connected ? 'Live' : 'Off'}</span>
             <span className="font-mono text-[8px] uppercase tracking-industrial text-ink-400 block mt-0.5">RFID</span>
           </Metric>
 
@@ -92,19 +103,16 @@ export function CajaSorterScreen() {
       <footer className="shrink-0 flex justify-center px-4 sm:px-6 py-3 sm:py-4 border-t border-ink-100 bg-white dark:bg-ink-700 dark:border-ink-600">
         <button
           type="button"
-          onClick={handleScan}
-          disabled={scanning}
+          disabled
           className={
             'w-full sm:w-auto justify-center ' +
             'inline-flex items-center gap-2.5 px-6 sm:px-8 py-3 sm:py-3.5 rounded-card border-2 ' +
             'font-display text-xs font-bold uppercase tracking-industrial shadow-card-hover transition-all ' +
-            (scanning
-              ? 'bg-ink-50 border-ink-100 text-ink-400 cursor-not-allowed dark:bg-ink-600 dark:border-ink-500'
-              : 'bg-rfid border-rfid text-white hover:bg-blue-700 dark:hover:bg-blue-600')
+            'bg-ink-50 border-ink-100 text-ink-400 cursor-not-allowed dark:bg-ink-600 dark:border-ink-500'
           }
         >
-          <IconScan size={17} color={scanning ? '#5C6878' : '#fff'} />
-          {scanning ? 'Escaneando...' : 'Escaneo arco RFID'}
+          <IconScan size={17} color="#5C6878" />
+          Esperando RFID real
         </button>
       </footer>
     </div>
@@ -142,7 +150,7 @@ function CurrentCaja({ current, bayColor }) {
   return (
     <div className="w-full flex flex-col items-center gap-5 sm:gap-7 animate-[fadeIn_.3s_ease]">
       <p className="font-mono text-xs uppercase tracking-industrial text-ink-400">
-        En Bahia {current.correctBay}, llevar a
+        En Bahia {current.bahiaActual}, llevar a
       </p>
 
       <div
@@ -163,7 +171,7 @@ function CurrentCaja({ current, bayColor }) {
           Caja {current.cajaDestino}
         </p>
         <p className="mt-2 text-sm text-ink-500 dark:text-ink-300">
-          Bahia {current.correctBay} · {current.tienda?.nombre || 'Sin tienda'}
+          Bahia {current.bahiaActual} - {current.tienda?.nombre || 'Sin tienda'}
         </p>
       </div>
 
@@ -209,7 +217,7 @@ function CajaHistory({ history }) {
         )}
 
         {history.map((scan) => {
-          const bayColor = BAY_COLORS[scan.correctBay] || '#6b7280';
+          const bayColor = BAY_COLORS[scan.bahiaActual] || '#6b7280';
           return (
             <div
               key={scan.id}
@@ -231,7 +239,7 @@ function CajaHistory({ history }) {
                   </span>
                 </div>
                 <div className="mt-0.5 text-[11px] text-ink-700 dark:text-ink-100 font-medium truncate">
-                  Bahia {scan.correctBay} · Caja {scan.cajaDestino}
+                  Bahia {scan.bahiaActual} - Caja {scan.cajaDestino}
                 </div>
                 <div className="mt-0.5 text-[10px] text-ink-400 truncate">
                   {scan.tienda?.nombre || 'Sin tienda'}

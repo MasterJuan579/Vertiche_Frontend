@@ -1,12 +1,30 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
-import {
-  BAY_COLORS,
-  CAJA_COUNT,
-  DEMO_PREPACKS,
-  getPrepacksForCaja,
-} from '../data/demoData.js';
+import { BAY_COLORS, CAJA_COUNT } from '../data/demoData.js';
+import { listTagsCompletos } from '../api/tags.js';
+import { listTiendas } from '../api/tiendas.js';
+import { connectRealtime } from '../api/rfid.js';
 import { IconScan, IconCheck, IconX } from '../components/Icons.jsx';
+
+function parseBahia(s) {
+  if (!s) return null;
+  const m = String(s).match(/(\d+)\s*$/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n >= 1 ? n : null;
+}
+
+function scanToPrepack(payload) {
+  return {
+    ...payload,
+    id: `${payload.epc}-${payload.timestamp || Date.now()}`,
+    scannedAt: payload.timestamp ? new Date(payload.timestamp).getTime() : Date.now(),
+    correctBay: payload.bahiaActual,
+    bayNumber: payload.bahiaActual,
+    orden_id: payload.orden_id,
+    producto: payload.producto,
+  };
+}
 
 export function OperatorScreen() {
   const { id } = useParams();
@@ -14,54 +32,66 @@ export function OperatorScreen() {
   const validCaja =
     Number.isFinite(cajaId) && cajaId >= 1 && cajaId <= CAJA_COUNT;
 
-  const activeBays = useMemo(
-    () => [...new Set(DEMO_PREPACKS.map((p) => p.correctBay))].sort((a, b) => a - b),
-    []
-  );
-  const [selectedBay, setSelectedBay] = useState(activeBays[0] || 1);
-  const demoPrepacks = useMemo(
-    () => DEMO_PREPACKS.filter((p) => p.correctBay === selectedBay),
-    [selectedBay]
-  );
+  const [activeBays, setActiveBays] = useState([1]);
+  const [selectedBay, setSelectedBay] = useState(1);
   const [current, setCurrent] = useState(null);
-  const [cursor, setCursor] = useState(0);
-  const [scanning, setScanning] = useState(false);
   const [totalMine, setTotalMine] = useState(0);
+  const [connected, setConnected] = useState(false);
 
-  const assignedPrepacks = useMemo(
-    () => (
-      validCaja
-        ? getPrepacksForCaja(selectedBay, cajaId)
-        : []
-    ),
-    [cajaId, selectedBay, validCaja]
-  );
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listTiendas(), listTagsCompletos()])
+      .then(([tiendas, tags]) => {
+        if (cancelled) return;
+        const bays = new Set([1]);
+        for (const tienda of Array.isArray(tiendas) ? tiendas : []) {
+          const bay = parseBahia(tienda.bahia_asignada);
+          if (bay) bays.add(bay);
+        }
+        for (const tag of Array.isArray(tags) ? tags : []) {
+          const bay = parseBahia(tag.tienda?.bahia_asignada);
+          if (bay) bays.add(bay);
+        }
+        const sorted = [...bays].sort((a, b) => a - b);
+        setActiveBays(sorted);
+        setSelectedBay((prev) => sorted.includes(prev) ? prev : sorted[0]);
+      })
+      .catch(() => {
+        if (!cancelled) setActiveBays([1]);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
-  const handleScan = useCallback(() => {
-    if (scanning) return;
-    setScanning(true);
-    const prepack = demoPrepacks[cursor % demoPrepacks.length];
-    const scan = {
-      ...prepack,
-      id: `${prepack.epc}-${Date.now()}`,
-      scannedAt: Date.now(),
+  useEffect(() => {
+    let socket;
+    let cancelled = false;
+    connectRealtime({
+      connect: () => { if (!cancelled) setConnected(true); },
+      disconnect: () => { if (!cancelled) setConnected(false); },
+      'sorter-caja-scan': (payload) => {
+        if (cancelled) return;
+        const scan = scanToPrepack(payload);
+        setCurrent(scan);
+        if (scan.bahiaActual === selectedBay && scan.cajaDestino === cajaId) {
+          setTotalMine((n) => n + 1);
+        }
+      },
+    }).then((s) => { socket = s; }).catch(() => setConnected(false));
+    return () => {
+      cancelled = true;
+      if (socket) socket.disconnect();
     };
-    const mine = scan.correctBay === selectedBay && scan.cajaDestino === cajaId;
-    setCurrent(scan);
-    if (mine) setTotalMine((n) => n + 1);
-    setCursor((c) => c + 1);
-    setTimeout(() => setScanning(false), 300);
-  }, [cajaId, cursor, demoPrepacks, scanning, selectedBay]);
+  }, [cajaId, selectedBay]);
 
   if (!validCaja) {
     return <Navigate to="/sorter/caja/1" replace />;
   }
 
   const shouldPick =
-    current?.correctBay === selectedBay && current?.cajaDestino === cajaId;
+    current?.bahiaActual === selectedBay && current?.cajaDestino === cajaId;
   const bayColor = BAY_COLORS[selectedBay] || '#6b7280';
   const destinationColor = current
-    ? BAY_COLORS[current.correctBay] || '#6b7280'
+    ? BAY_COLORS[current.bahiaActual] || '#6b7280'
     : bayColor;
 
   return (
@@ -76,17 +106,17 @@ export function OperatorScreen() {
 
         <div className="flex-1 min-w-0">
           <div className="font-display text-base sm:text-lg font-bold text-ink-700 dark:text-ink-100">
-            Bahia {selectedBay} · Caja {cajaId}
+            Bahia {selectedBay} - Caja {cajaId}
           </div>
           <div className="font-mono text-[11px] text-ink-400 truncate">
-            {assignedPrepacks.length} prepack{assignedPrepacks.length !== 1 ? 's' : ''} en cola · {totalMine} tomado{totalMine !== 1 ? 's' : ''}
+            {totalMine} tomado{totalMine !== 1 ? 's' : ''} para esta caja
           </div>
         </div>
 
         <div className="hidden sm:flex items-center gap-1.5 shrink-0">
           <span className="w-2 h-2 rounded-full bg-flow-ring animate-pulse" />
           <span className="font-mono text-[10px] uppercase tracking-industrial text-flow dark:text-flow-ring">
-            RFID demo
+            {connected ? 'RFID vivo' : 'Conectando'}
           </span>
         </div>
       </header>
@@ -106,7 +136,6 @@ export function OperatorScreen() {
                   setSelectedBay(bay);
                   setCurrent(null);
                   setTotalMine(0);
-                  setCursor(0);
                 }}
                 className={
                   'w-9 h-8 rounded-card border font-mono text-[12px] font-bold shrink-0 transition-colors ' +
@@ -147,19 +176,16 @@ export function OperatorScreen() {
       <footer className="shrink-0 flex justify-center px-4 sm:px-6 py-3 sm:py-4 border-t border-ink-100 bg-white dark:bg-ink-700 dark:border-ink-600">
         <button
           type="button"
-          onClick={handleScan}
-          disabled={scanning}
+          disabled
           className={
             'w-full sm:w-auto justify-center ' +
             'inline-flex items-center gap-2.5 px-6 sm:px-8 py-3 sm:py-3.5 rounded-card border-2 ' +
             'font-display text-xs font-bold uppercase tracking-industrial shadow-card-hover transition-all ' +
-            (scanning
-              ? 'bg-ink-50 border-ink-100 text-ink-400 cursor-not-allowed dark:bg-ink-600 dark:border-ink-500'
-              : 'bg-rfid border-rfid text-white hover:bg-blue-700 dark:hover:bg-blue-600')
+            'bg-ink-50 border-ink-100 text-ink-400 cursor-not-allowed dark:bg-ink-600 dark:border-ink-500'
           }
         >
-          <IconScan size={17} color={scanning ? '#5C6878' : '#fff'} />
-          {scanning ? 'Escaneando...' : 'Simular RFID'}
+          <IconScan size={17} color="#5C6878" />
+          Esperando RFID real
         </button>
       </footer>
     </div>
@@ -216,8 +242,8 @@ function PickState({ current, shouldPick, selectedBay, cajaId, destinationColor 
 
         <p className="mt-4 sm:mt-5 text-base sm:text-lg font-display font-bold text-ink-700 dark:text-white">
           {shouldPick
-            ? `Bahia ${selectedBay} · Caja ${cajaId}`
-            : `Destino: Bahia ${current.correctBay} · Caja ${current.cajaDestino}`}
+            ? `Bahia ${selectedBay} - Caja ${cajaId}`
+            : `Destino: Bahia ${current.bahiaActual} - Caja ${current.cajaDestino}`}
         </p>
 
         <div className="mt-4 sm:mt-5 inline-flex flex-wrap justify-center items-center gap-3 sm:gap-4 px-4 sm:px-5 py-3 rounded-card border border-ink-100 bg-white dark:bg-ink-700 dark:border-ink-600 max-w-full">
