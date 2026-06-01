@@ -304,26 +304,111 @@ function PrepackInfoCard({ tag, ocOwner }) {
   const colorCSS = getColorCSS(tag.color || '');
   const esClaro = esColorClaro(tag.color || '');
   const etapaColor = ETAPA_COLORS[tag.etapa_actual] || '#94A3B8';
+  const productIcon = getProductIcon(tag.sku, tag.proveedor?.category);
 
   return (
     <Panel title="Información del prepack">
-      <div className="p-4 grid grid-cols-1 sm:grid-cols-[64px_1fr] gap-4">
-        <div className="w-16 h-16 rounded-lg flex items-center justify-center shadow-card" style={{ background: colorCSS, border: esClaro ? '2px solid #E2E8F0' : 'none' }}>
-          <span className="text-[10px] font-bold" style={{ color: esClaro ? '#1E293B' : 'white' }}>{tag.cantidad_piezas || 1}p</span>
+      <div className="p-4 grid grid-cols-1 sm:grid-cols-[80px_1fr] gap-4">
+        {/* Icono del producto + chip de color al pie */}
+        <div className="flex flex-col items-center gap-1.5">
+          <div className="w-20 h-20 rounded-lg flex items-center justify-center shadow-card bg-ink-50 dark:bg-ink-800 text-4xl">
+            {productIcon}
+          </div>
+          {tag.color && (
+            <div className="flex items-center gap-1 text-[10px] text-ink-500 dark:text-ink-300">
+              <span className="w-3 h-3 rounded-full border border-ink-200 dark:border-ink-500" style={{ background: colorCSS }} />
+              <span className="font-mono">{tag.color}</span>
+            </div>
+          )}
         </div>
+
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <InfoField label="EPC" value={tag.epc} mono span={3} />
           <InfoField label="SKU" value={tag.sku} />
           <InfoField label="Talla" value={tag.talla} />
-          <InfoField label="Color" value={tag.color} />
           <InfoField label="Piezas" value={tag.cantidad_piezas} />
-          <InfoField label="Tienda" value={tag.tienda?.nombre || tag.tienda_id} />
+          <InfoField label="Tienda destino" value={tag.tienda?.nombre || tag.tienda_id} span={2} />
           <InfoField label="Etapa actual" value={ETAPA_LABELS[tag.etapa_actual] || tag.etapa_actual} valueStyle={{ color: etapaColor }} />
-          {ocOwner && <InfoField label="Orden" value={ocOwner.ordenId} mono span={2} />}
+          {ocOwner && <InfoField label="Orden" value={ocOwner.ordenId} mono span={3} />}
         </div>
       </div>
+
+      {/* Sección del proveedor con rating */}
+      {tag.proveedor && (
+        <div className="border-t border-ink-100 dark:border-ink-600 px-4 py-3 bg-ink-50/40 dark:bg-ink-800/40">
+          <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-ink-400 mb-1.5">
+            Proveedor
+          </div>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-semibold text-ink-700 dark:text-ink-100 truncate">
+                {tag.proveedor.nombre}
+              </div>
+              <div className="text-[11px] text-ink-400 font-mono">{tag.proveedor.codigo}</div>
+            </div>
+            <ProveedorRating proveedor={tag.proveedor} />
+          </div>
+        </div>
+      )}
     </Panel>
   );
+}
+
+function ProveedorRating({ proveedor }) {
+  const stars = Number(proveedor?.stars || 0);
+  const level = proveedor?.level || 'NUEVO';
+  const approvalRate = proveedor?.approval_rate;
+
+  // Color por level
+  const levelColor = {
+    ELITE: 'bg-flow-bg text-flow border-flow-ring/40 dark:bg-flow/20 dark:text-flow-ring',
+    MEDIA: 'bg-attention-bg text-attention border-attention-ring/40 dark:bg-attention/20 dark:text-attention-ring',
+    BAJA:  'bg-anomaly-bg text-anomaly border-anomaly-ring/40 dark:bg-anomaly/20 dark:text-anomaly-ring',
+    NUEVO: 'bg-ink-50 text-ink-500 border-ink-200 dark:bg-ink-700 dark:text-ink-300 dark:border-ink-500',
+  }[level] || 'bg-ink-50 text-ink-500 border-ink-200';
+
+  return (
+    <div className="flex items-center gap-2 shrink-0">
+      <StarRow value={stars} />
+      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-industrial border ${levelColor}`}>
+        {level}
+      </span>
+      {approvalRate != null && (
+        <span className="text-[11px] text-ink-500 dark:text-ink-300 font-mono">{approvalRate}% aprob.</span>
+      )}
+    </div>
+  );
+}
+
+function StarRow({ value }) {
+  // Renderiza 5 estrellas, con value (0..5) llenando parcial
+  const full = Math.floor(value);
+  const half = value - full >= 0.5;
+  return (
+    <div className="flex items-center gap-0.5 text-[14px]" title={`${value.toFixed(1)} / 5`}>
+      {[0,1,2,3,4].map(i => {
+        if (i < full) return <span key={i} className="text-amber-400">★</span>;
+        if (i === full && half) return <span key={i} className="text-amber-400">◐</span>;
+        return <span key={i} className="text-ink-200 dark:text-ink-600">★</span>;
+      })}
+    </div>
+  );
+}
+
+/**
+ * Devuelve un emoji visual según el tipo de prenda detectado por keywords
+ * en el SKU o la categoría del proveedor. Fallback genérico a caja 📦.
+ */
+function getProductIcon(sku = '', category = '') {
+  const text = `${sku} ${category}`.toLowerCase();
+  if (/playera|camis|polo|blusa|t-shirt|tshirt/.test(text)) return '👕';
+  if (/jean|pantal|short/.test(text)) return '👖';
+  if (/vestid|falda/.test(text)) return '👗';
+  if (/hoodie|sudader|jacket|abrigo|chamarr/.test(text)) return '🧥';
+  if (/zapat|tenis|bota|sandalia/.test(text)) return '👟';
+  if (/gorr|sombrer/.test(text)) return '🧢';
+  if (/bolsa|mochila/.test(text)) return '🎒';
+  return '📦';
 }
 
 function InfoField({ label, value, mono = false, span = 1, valueStyle }) {

@@ -166,4 +166,11 @@ export const realApi = {
   getOrdenes() {
     return request('/OrdenCompra/listarOrdenes');
   },
+
+  // ============================================
+  // KPI del CEDIS para la barra superior de FlujoCEDIS
+  // ============================================
+  getKpi() {
+    return request('/rfid/kpi');
+  },
 };

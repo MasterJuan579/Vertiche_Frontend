@@ -279,6 +279,8 @@ function PrepackCell({ prepack, estado, onClick }) {
     : 'bg-flow/10 border-flow-ring/40 dark:bg-flow/15 dark:border-flow-ring/40';
 
   const dotCls = pendiente ? 'bg-ink-300 dark:bg-ink-500' : 'bg-flow-ring';
+  const icono = getProductIcon(prepack.sku);
+  const colorHex = COLORES_PALETA.find(c => normalizeColor(c.nombre) === normalizeColor(prepack.color))?.hex;
 
   return (
     <button
@@ -293,20 +295,41 @@ function PrepackCell({ prepack, estado, onClick }) {
           {pendiente ? 'Pendiente' : '✓ Asignado'}
         </span>
       </div>
-      <div className="font-mono text-[10px] text-ink-700 dark:text-ink-100 truncate mb-1" title={prepack.epc}>
-        {pendiente ? <span className="text-ink-400 italic">sin EPC</span> : epcCorto(prepack.epc)}
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-2xl">{icono}</span>
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] text-ink-700 dark:text-ink-100 font-semibold truncate">{prepack.sku}</div>
+          <div className="font-mono text-[9px] text-ink-500 dark:text-ink-300 truncate" title={prepack.epc}>
+            {pendiente ? <span className="italic text-ink-400">sin EPC</span> : epcCorto(prepack.epc)}
+          </div>
+        </div>
       </div>
-      <div className="text-[11px] text-ink-700 dark:text-ink-100 mb-0.5 font-semibold">
-        {prepack.sku}
+      <div className="flex items-center gap-1.5 text-[10px] text-ink-500 dark:text-ink-300 mb-1">
+        <span className="font-semibold">{prepack.talla}</span>
+        <span>·</span>
+        {colorHex && <span className="w-2.5 h-2.5 rounded-full border border-ink-200 dark:border-ink-500" style={{ background: colorHex }} />}
+        <span>{prepack.color || '—'}</span>
+        <span>·</span>
+        <span>{prepack.cantidad_piezas}p</span>
       </div>
-      <div className="text-[10px] text-ink-500 dark:text-ink-300">
-        {prepack.talla} · {prepack.color || '—'} · {prepack.cantidad_piezas} pzs
-      </div>
-      <div className="text-[10px] text-ink-400 mt-1 truncate">
-        {prepack.Tienda?.nombre || prepack.tienda_id}
+      <div className="text-[10px] text-ink-400 truncate">
+        🏬 {prepack.Tienda?.nombre || prepack.tienda_id}
       </div>
     </button>
   );
+}
+
+// Mismo helper que Trazabilidad
+function getProductIcon(sku = '') {
+  const text = (sku || '').toLowerCase();
+  if (/playera|camis|polo|blusa|t-shirt|tshirt/.test(text)) return '👕';
+  if (/jean|pantal|short/.test(text)) return '👖';
+  if (/vestid|falda/.test(text)) return '👗';
+  if (/hoodie|sudader|jacket|abrigo|chamarr/.test(text)) return '🧥';
+  if (/zapat|tenis|bota|sandalia/.test(text)) return '👟';
+  if (/gorr|sombrer/.test(text)) return '🧢';
+  if (/bolsa|mochila/.test(text)) return '🎒';
+  return '📦';
 }
 
 function ProgressBar({ asignados, total }) {
@@ -553,7 +576,7 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
                     </select>
                   </FormField>
                   <FormField label={idx === 0 ? 'Color' : null} compact>
-                    <input type="text" placeholder="Azul" value={r.color} onChange={(e) => setReng(idx, 'color', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 placeholder:text-ink-400 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100" />
+                    <ColorPicker value={r.color} onChange={(v) => setReng(idx, 'color', v)} />
                   </FormField>
                   <FormField label={idx === 0 ? 'Pzs/prepack' : null} compact required>
                     <input type="number" min="1" value={r.piezas_por_prepack} onChange={(e) => setReng(idx, 'piezas_por_prepack', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100" />
@@ -606,6 +629,95 @@ function Panel({ title, children }) {
       {children}
     </div>
   );
+}
+
+// Paleta cerrada de colores comunes. El valor que se guarda en BD es el
+// `nombre` (siempre capitalizado, ej. "Azul") para que el matching sea
+// consistente sin importar cómo lo tipee el usuario.
+const COLORES_PALETA = [
+  { nombre: 'Azul',    hex: '#3B82F6' },
+  { nombre: 'Negro',   hex: '#1E293B' },
+  { nombre: 'Blanco',  hex: '#F8FAFC' },
+  { nombre: 'Rojo',    hex: '#EF4444' },
+  { nombre: 'Verde',   hex: '#22C55E' },
+  { nombre: 'Amarillo',hex: '#EAB308' },
+  { nombre: 'Naranja', hex: '#F97316' },
+  { nombre: 'Rosa',    hex: '#EC4899' },
+  { nombre: 'Morado',  hex: '#8B5CF6' },
+  { nombre: 'Gris',    hex: '#94A3B8' },
+  { nombre: 'Beige',   hex: '#D4B896' },
+  { nombre: 'Café',    hex: '#92400E' },
+  { nombre: 'Navy',    hex: '#1E3A8A' },
+  { nombre: 'Camel',   hex: '#C2956A' },
+];
+
+/**
+ * Selector visual de color. Muestra la paleta cerrada como swatches y un
+ * input libre para colores fuera de la lista. Normaliza el valor para que
+ * "azul" / "AZUL" / "Azul" se guarden como "Azul" (Title Case).
+ */
+function ColorPicker({ value, onChange }) {
+  const [abierto, setAbierto] = useState(false);
+  const seleccionado = COLORES_PALETA.find((c) => normalizeColor(c.nombre) === normalizeColor(value));
+  const hex = seleccionado?.hex || '#94A3B8';
+  const esClaro = ['#F8FAFC', '#D4B896', '#EAB308'].includes(hex);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 hover:border-rfid focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100 flex items-center gap-2"
+      >
+        <span
+          className="w-3.5 h-3.5 rounded-full border border-ink-200 dark:border-ink-500 shrink-0"
+          style={{ background: hex }}
+        />
+        <span className="truncate flex-1 text-left">{value || 'Color...'}</span>
+        <span className="text-[8px] opacity-60">▾</span>
+      </button>
+
+      {abierto && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setAbierto(false)} />
+          <div className="absolute z-50 mt-1 left-0 w-[220px] rounded-card border bg-white border-ink-100 shadow-xl dark:bg-ink-700 dark:border-ink-600 p-2">
+            <div className="grid grid-cols-5 gap-1.5">
+              {COLORES_PALETA.map((c) => {
+                const activo = normalizeColor(c.nombre) === normalizeColor(value);
+                return (
+                  <button
+                    key={c.nombre}
+                    type="button"
+                    onClick={() => { onChange(c.nombre); setAbierto(false); }}
+                    title={c.nombre}
+                    className={`w-9 h-9 rounded-full border-2 transition-transform hover:scale-110 ${activo ? 'border-rfid ring-2 ring-rfid/30' : 'border-ink-200 dark:border-ink-500'}`}
+                    style={{ background: c.hex }}
+                  />
+                );
+              })}
+            </div>
+            <div className="border-t border-ink-100 dark:border-ink-600 mt-2 pt-2">
+              <input
+                type="text"
+                placeholder="Otro color..."
+                value={value || ''}
+                onChange={(e) => onChange(normalizeColor(e.target.value))}
+                className="w-full px-2 py-1 rounded text-[11px] outline-none bg-ink-50 border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-800 dark:border-ink-500 dark:text-ink-100"
+              />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// "azul", "AZUL", " Azul " → "Azul"
+function normalizeColor(s) {
+  if (!s) return '';
+  const trimmed = s.trim().toLowerCase();
+  if (!trimmed) return '';
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
 }
 
 function FormField({ label, required, compact, children }) {

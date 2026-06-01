@@ -72,14 +72,25 @@ export function FlujoCEDIS() {
   async function cargarDatos() {
     try {
       setError(null);
-      const [ordenes, tags, anomalias] = await Promise.all([
+      const [ordenes, tags, anomalias, kpiBackend] = await Promise.all([
         realApi.getOrdenesCompra(),
         realApi.getTags(),
         realApi.getAnomalias({ soloAbiertas: true }),
+        realApi.getKpi().catch(() => null), // si falla, fallback al kpi local
       ]);
-      const { ocs, kpi } = buildOcsView(ordenes || [], tags || [], anomalias || []);
+      const { ocs, kpi: kpiLocal } = buildOcsView(ordenes || [], tags || [], anomalias || []);
       setOcsView(ocs);
-      setKpiView(kpi);
+      // Mezcla: lo del backend pisa lo local cuando viene definido.
+      setKpiView({
+        ...kpiLocal,
+        ...(kpiBackend && {
+          mejora_porcentaje: kpiBackend.mejora_porcentaje,
+          objetivo_mejora_pct: kpiBackend.objetivo_mejora_pct,
+          tiempo_promedio_hoy_min: kpiBackend.tiempo_promedio_min,
+          palets_activos: kpiBackend.palets_activos,
+          palets_completados_hoy: kpiBackend.palets_completados_hoy,
+        }),
+      });
     } catch (err) {
       setError(err.message);
     } finally {
