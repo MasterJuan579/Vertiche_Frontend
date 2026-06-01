@@ -153,13 +153,24 @@ export function Vinculacion() {
               ))}
             </select>
 
-            {ocActiva && (
-              <div className="text-[12px] text-ink-500 dark:text-ink-300 space-y-1">
-                <div><strong>Producto:</strong> {ocActiva.nombre_producto}</div>
-                {ocActiva.modelo && <div><strong>Modelo:</strong> {ocActiva.modelo}</div>}
-                <div><strong>Estado:</strong> {ocActiva.estado}</div>
-              </div>
-            )}
+            {ocActiva && (() => {
+              const provOc = proveedores.find((p) => p.id === ocActiva.proveedor_id);
+              return (
+                <div className="text-[12px] text-ink-500 dark:text-ink-300 space-y-1.5">
+                  <div><strong>Producto:</strong> {ocActiva.nombre_producto}</div>
+                  {ocActiva.modelo && <div><strong>Modelo:</strong> {ocActiva.modelo}</div>}
+                  <div><strong>Estado:</strong> {ocActiva.estado}</div>
+                  {provOc && (
+                    <div className="pt-1.5 border-t border-ink-100 dark:border-ink-600">
+                      <div className="text-[11px] text-ink-700 dark:text-ink-100 font-semibold truncate mb-1">
+                        {provOc.nombre}
+                      </div>
+                      <ProveedorRatingChip proveedor={provOc} />
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {prepacks && (
               <div className="pt-3 border-t border-ink-100 dark:border-ink-600">
@@ -279,7 +290,6 @@ function PrepackCell({ prepack, estado, onClick }) {
     : 'bg-flow/10 border-flow-ring/40 dark:bg-flow/15 dark:border-flow-ring/40';
 
   const dotCls = pendiente ? 'bg-ink-300 dark:bg-ink-500' : 'bg-flow-ring';
-  const icono = getProductIcon(prepack.sku);
   const colorHex = COLORES_PALETA.find(c => normalizeColor(c.nombre) === normalizeColor(prepack.color))?.hex;
 
   return (
@@ -296,7 +306,9 @@ function PrepackCell({ prepack, estado, onClick }) {
         </span>
       </div>
       <div className="flex items-center gap-2 mb-1">
-        <span className="text-2xl">{icono}</span>
+        <div className="text-ink-500 dark:text-ink-300 shrink-0">
+          <ProductIcon sku={prepack.sku} size={28} />
+        </div>
         <div className="flex-1 min-w-0">
           <div className="text-[11px] text-ink-700 dark:text-ink-100 font-semibold truncate">{prepack.sku}</div>
           <div className="font-mono text-[9px] text-ink-500 dark:text-ink-300 truncate" title={prepack.epc}>
@@ -312,24 +324,168 @@ function PrepackCell({ prepack, estado, onClick }) {
         <span>·</span>
         <span>{prepack.cantidad_piezas}p</span>
       </div>
-      <div className="text-[10px] text-ink-400 truncate">
-        🏬 {prepack.Tienda?.nombre || prepack.tienda_id}
+      <div className="flex items-center gap-1 text-[10px] text-ink-400 truncate">
+        <StoreIcon size={11} />
+        <span className="truncate">{prepack.Tienda?.nombre || prepack.tienda_id}</span>
       </div>
     </button>
   );
 }
 
-// Mismo helper que Trazabilidad
-function getProductIcon(sku = '') {
-  const text = (sku || '').toLowerCase();
-  if (/playera|camis|polo|blusa|t-shirt|tshirt/.test(text)) return '👕';
-  if (/jean|pantal|short/.test(text)) return '👖';
-  if (/vestid|falda/.test(text)) return '👗';
-  if (/hoodie|sudader|jacket|abrigo|chamarr/.test(text)) return '🧥';
-  if (/zapat|tenis|bota|sandalia/.test(text)) return '👟';
-  if (/gorr|sombrer/.test(text)) return '🧢';
-  if (/bolsa|mochila/.test(text)) return '🎒';
-  return '📦';
+/* ────────────────────────────────────────────────────────────────────────
+ * Iconos SVG inline (Lucide-style). Reciben opcionalmente size.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+function ProductIcon({ sku = '', category = '', size = 24 }) {
+  const text = `${sku} ${category}`.toLowerCase();
+  if (/playera|camis|polo|blusa|t-shirt|tshirt/.test(text)) return <IconCamiseta size={size} />;
+  if (/jean|pantal|short/.test(text)) return <IconPantalon size={size} />;
+  if (/vestid|falda/.test(text)) return <IconVestido size={size} />;
+  if (/hoodie|sudader|jacket|abrigo|chamarr/.test(text)) return <IconChamarra size={size} />;
+  if (/zapat|tenis|bota|sandalia/.test(text)) return <IconZapato size={size} />;
+  if (/gorr|sombrer/.test(text)) return <IconGorra size={size} />;
+  if (/bolsa|mochila/.test(text)) return <IconMochila size={size} />;
+  return <IconPaquete size={size} />;
+}
+
+function svgProps(size) {
+  return {
+    width: size, height: size, viewBox: '0 0 24 24',
+    fill: 'none', stroke: 'currentColor',
+    strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round',
+  };
+}
+
+function IconCamiseta({ size = 24 }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M8 3 4 6l2 4 2-1v11h8V9l2 1 2-4-4-3-2 2a3 3 0 0 1-4 0L8 3Z" />
+    </svg>
+  );
+}
+
+function IconPantalon({ size = 24 }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M5 3h14v3l-2 15h-4l-1-11-1 11H7L5 6V3Z" />
+      <path d="M5 6h14" />
+    </svg>
+  );
+}
+
+function IconVestido({ size = 24 }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M9 3h6l1 4-2 2v3l4 10H6l4-10V9L8 7l1-4Z" />
+    </svg>
+  );
+}
+
+function IconChamarra({ size = 24 }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M8 3 4 6v14h6V3" />
+      <path d="M16 3v17h4V6l-4-3" />
+      <path d="M12 3v17" />
+      <path d="M10 7l2 1 2-1" />
+    </svg>
+  );
+}
+
+function IconZapato({ size = 24 }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M2 17a3 3 0 0 0 3 3h13a3 3 0 0 0 3-3v-1H2v1Z" />
+      <path d="M5 16V8c0-1 1-2 2-2h2l2 3 4 1c1 0 2 1 2 2v4" />
+    </svg>
+  );
+}
+
+function IconGorra({ size = 24 }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M3 16c1-7 6-10 9-10s8 3 9 10v1H3v-1Z" />
+      <path d="M3 17c0 1.5 1.5 2 4 2h10c2.5 0 4-.5 4-2" />
+    </svg>
+  );
+}
+
+function IconMochila({ size = 24 }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M6 8v12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a4 4 0 0 0-4-4h-4a4 4 0 0 0-4 4Z" />
+      <path d="M9 4V2h6v2" />
+      <path d="M6 13h12" />
+    </svg>
+  );
+}
+
+function IconPaquete({ size = 24 }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M3 7v10l9 4 9-4V7l-9-4-9 4Z" />
+      <path d="M3 7l9 4 9-4M12 21V11" />
+    </svg>
+  );
+}
+
+function StoreIcon({ size = 14 }) {
+  return (
+    <svg {...svgProps(size)} aria-hidden="true">
+      <path d="M3 9V6l2-3h14l2 3v3" />
+      <path d="M3 9a2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0 2 2 0 0 0 4 0" />
+      <path d="M5 9v12h14V9" />
+      <path d="M10 21v-6h4v6" />
+    </svg>
+  );
+}
+
+function StarIcon({ size = 14, filled = true }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24"
+      fill={filled ? 'currentColor' : 'none'} stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 2 3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7l3-7Z" />
+    </svg>
+  );
+}
+
+function StarRow({ value, size = 12 }) {
+  const full = Math.floor(value);
+  const half = value - full >= 0.5;
+  return (
+    <div className="flex items-center gap-0.5" title={`${value.toFixed(1)} / 5`}>
+      {[0,1,2,3,4].map(i => (
+        <span key={i} className={i < full || (i === full && half) ? 'text-amber-400' : 'text-ink-200 dark:text-ink-600'}>
+          <StarIcon size={size} filled />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ProveedorRatingChip({ proveedor }) {
+  if (!proveedor) return null;
+  const stars = Number(proveedor.stars || 0);
+  const level = proveedor.level || 'NUEVO';
+  const levelColor = {
+    ELITE: 'bg-flow-bg text-flow border-flow-ring/40 dark:bg-flow/20 dark:text-flow-ring',
+    MEDIA: 'bg-attention-bg text-attention border-attention-ring/40 dark:bg-attention/20 dark:text-attention-ring',
+    BAJA:  'bg-anomaly-bg text-anomaly border-anomaly-ring/40 dark:bg-anomaly/20 dark:text-anomaly-ring',
+    NUEVO: 'bg-ink-50 text-ink-500 border-ink-200 dark:bg-ink-700 dark:text-ink-300 dark:border-ink-500',
+  }[level] || 'bg-ink-50 text-ink-500 border-ink-200';
+
+  return (
+    <div className="flex items-center gap-1.5 text-[11px]">
+      <StarRow value={stars} size={11} />
+      <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-industrial border ${levelColor}`}>
+        {level}
+      </span>
+      {proveedor.approval_rate != null && (
+        <span className="text-ink-400 dark:text-ink-300 font-mono">{proveedor.approval_rate}%</span>
+      )}
+    </div>
+  );
 }
 
 function ProgressBar({ asignados, total }) {
@@ -541,6 +697,15 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
                 <option value="">Seleccionar...</option>
                 {proveedores.map((p) => <option key={p.id} value={p.id}>{p.codigo} — {p.nombre}</option>)}
               </select>
+              {(() => {
+                const provSel = proveedores.find((p) => String(p.id) === String(form.proveedor_id));
+                if (!provSel) return null;
+                return (
+                  <div className="mt-1.5 px-2.5 py-1.5 rounded-card bg-ink-50 dark:bg-ink-800 border border-ink-100 dark:border-ink-600">
+                    <ProveedorRatingChip proveedor={provSel} />
+                  </div>
+                );
+              })()}
             </FormField>
             <FormField label="Nombre del producto" required>
               <input type="text" placeholder="Playera básica algodón" value={form.nombre_producto} onChange={(e) => set('nombre_producto', e.target.value)} className="w-full px-3 py-2 rounded-card text-[13px] outline-none bg-white border border-ink-100 text-ink-700 placeholder:text-ink-400 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100" />

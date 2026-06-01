@@ -302,17 +302,15 @@ function SkuMatchRow({ tag, onVer }) {
 
 function PrepackInfoCard({ tag, ocOwner }) {
   const colorCSS = getColorCSS(tag.color || '');
-  const esClaro = esColorClaro(tag.color || '');
   const etapaColor = ETAPA_COLORS[tag.etapa_actual] || '#94A3B8';
-  const productIcon = getProductIcon(tag.sku, tag.proveedor?.category);
 
   return (
     <Panel title="Información del prepack">
       <div className="p-4 grid grid-cols-1 sm:grid-cols-[80px_1fr] gap-4">
         {/* Icono del producto + chip de color al pie */}
         <div className="flex flex-col items-center gap-1.5">
-          <div className="w-20 h-20 rounded-lg flex items-center justify-center shadow-card bg-ink-50 dark:bg-ink-800 text-4xl">
-            {productIcon}
+          <div className="w-20 h-20 rounded-lg flex items-center justify-center shadow-card bg-ink-50 dark:bg-ink-800 text-ink-600 dark:text-ink-200">
+            <ProductIcon sku={tag.sku} category={tag.proveedor?.category} size={44} />
           </div>
           {tag.color && (
             <div className="flex items-center gap-1 text-[10px] text-ink-500 dark:text-ink-300">
@@ -380,35 +378,62 @@ function ProveedorRating({ proveedor }) {
   );
 }
 
-function StarRow({ value }) {
-  // Renderiza 5 estrellas, con value (0..5) llenando parcial
+function StarRow({ value, size = 14 }) {
   const full = Math.floor(value);
   const half = value - full >= 0.5;
   return (
-    <div className="flex items-center gap-0.5 text-[14px]" title={`${value.toFixed(1)} / 5`}>
-      {[0,1,2,3,4].map(i => {
-        if (i < full) return <span key={i} className="text-amber-400">★</span>;
-        if (i === full && half) return <span key={i} className="text-amber-400">◐</span>;
-        return <span key={i} className="text-ink-200 dark:text-ink-600">★</span>;
-      })}
+    <div className="flex items-center gap-0.5" title={`${value.toFixed(1)} / 5`}>
+      {[0,1,2,3,4].map(i => (
+        <span key={i} className={i < full || (i === full && half) ? 'text-amber-400' : 'text-ink-200 dark:text-ink-600'}>
+          <StarIcon size={size} />
+        </span>
+      ))}
     </div>
   );
 }
 
+function StarIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" stroke="currentColor"
+      strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m12 2 3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7l3-7Z" />
+    </svg>
+  );
+}
+
 /**
- * Devuelve un emoji visual según el tipo de prenda detectado por keywords
- * en el SKU o la categoría del proveedor. Fallback genérico a caja 📦.
+ * Icono SVG según el tipo de prenda detectado por keywords en SKU o categoría
+ * del proveedor. Fallback: caja genérica.
  */
-function getProductIcon(sku = '', category = '') {
+function ProductIcon({ sku = '', category = '', size = 24 }) {
   const text = `${sku} ${category}`.toLowerCase();
-  if (/playera|camis|polo|blusa|t-shirt|tshirt/.test(text)) return '👕';
-  if (/jean|pantal|short/.test(text)) return '👖';
-  if (/vestid|falda/.test(text)) return '👗';
-  if (/hoodie|sudader|jacket|abrigo|chamarr/.test(text)) return '🧥';
-  if (/zapat|tenis|bota|sandalia/.test(text)) return '👟';
-  if (/gorr|sombrer/.test(text)) return '🧢';
-  if (/bolsa|mochila/.test(text)) return '🎒';
-  return '📦';
+  const props = {
+    width: size, height: size, viewBox: '0 0 24 24',
+    fill: 'none', stroke: 'currentColor',
+    strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round',
+  };
+  if (/playera|camis|polo|blusa|t-shirt|tshirt/.test(text)) {
+    return <svg {...props}><path d="M8 3 4 6l2 4 2-1v11h8V9l2 1 2-4-4-3-2 2a3 3 0 0 1-4 0L8 3Z" /></svg>;
+  }
+  if (/jean|pantal|short/.test(text)) {
+    return <svg {...props}><path d="M5 3h14v3l-2 15h-4l-1-11-1 11H7L5 6V3Z" /><path d="M5 6h14" /></svg>;
+  }
+  if (/vestid|falda/.test(text)) {
+    return <svg {...props}><path d="M9 3h6l1 4-2 2v3l4 10H6l4-10V9L8 7l1-4Z" /></svg>;
+  }
+  if (/hoodie|sudader|jacket|abrigo|chamarr/.test(text)) {
+    return <svg {...props}><path d="M8 3 4 6v14h6V3" /><path d="M16 3v17h4V6l-4-3" /><path d="M12 3v17" /><path d="M10 7l2 1 2-1" /></svg>;
+  }
+  if (/zapat|tenis|bota|sandalia/.test(text)) {
+    return <svg {...props}><path d="M2 17a3 3 0 0 0 3 3h13a3 3 0 0 0 3-3v-1H2v1Z" /><path d="M5 16V8c0-1 1-2 2-2h2l2 3 4 1c1 0 2 1 2 2v4" /></svg>;
+  }
+  if (/gorr|sombrer/.test(text)) {
+    return <svg {...props}><path d="M3 16c1-7 6-10 9-10s8 3 9 10v1H3v-1Z" /><path d="M3 17c0 1.5 1.5 2 4 2h10c2.5 0 4-.5 4-2" /></svg>;
+  }
+  if (/bolsa|mochila/.test(text)) {
+    return <svg {...props}><path d="M6 8v12a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8a4 4 0 0 0-4-4h-4a4 4 0 0 0-4 4Z" /><path d="M9 4V2h6v2" /><path d="M6 13h12" /></svg>;
+  }
+  return <svg {...props}><path d="M3 7v10l9 4 9-4V7l-9-4-9 4Z" /><path d="M3 7l9 4 9-4M12 21V11" /></svg>;
 }
 
 function InfoField({ label, value, mono = false, span = 1, valueStyle }) {
