@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
-import { BAY_COLORS } from '../data/demoData.js';
-import { connectRealtime } from '../api/rfid.js';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  BAY_COLORS,
+  DEMO_BAY_ID,
+  getPrepacksForDemoBay,
+} from '../data/demoData.js';
 import { IconScan, IconSigma, IconBolt } from '../components/Icons.jsx';
 
 function fmtTime(ts) {
@@ -24,26 +27,69 @@ function scanToPrepack(payload) {
 export function CajaSorterScreen() {
   const [current, setCurrent] = useState(null);
   const [history, setHistory] = useState([]);
-  const [connected, setConnected] = useState(false);
+  const [cursor, setCursor] = useState(0);
+  const [scanning, setScanning] = useState(false);
+  const [liveStatus, setLiveStatus] = useState('connecting');
+
+  const processScan = useCallback((prepack) => {
+    if (!prepack) return;
+    const scan = {
+      ...prepack,
+      id: prepack.scanId || `${prepack.epc}-${Date.now()}`,
+      scannedAt: Date.now(),
+    };
+    setCurrent(scan);
+    setHistory((prev) => [scan, ...prev].slice(0, 18));
+  }, []);
 
   useEffect(() => {
     let socket;
     let cancelled = false;
-    connectRealtime({
-      connect: () => { if (!cancelled) setConnected(true); },
-      disconnect: () => { if (!cancelled) setConnected(false); },
-      'sorter-caja-scan': (payload) => {
+    const API_URL = import.meta.env.VITE_API_URL || '';
+
+    if (!API_URL) {
+      setLiveStatus('demo');
+      return undefined;
+    }
+
+    (async () => {
+      try {
+        const { io } = await import('socket.io-client');
         if (cancelled) return;
-        const scan = scanToPrepack(payload);
-        setCurrent(scan);
-        setHistory((prev) => [scan, ...prev].slice(0, 18));
-      },
-    }).then((s) => { socket = s; }).catch(() => setConnected(false));
+
+        socket = io(API_URL, {
+          transports: ['websocket', 'polling'],
+          reconnectionDelay: 800,
+          reconnectionDelayMax: 2500,
+        });
+
+        socket.on('connect', () => setLiveStatus('live'));
+        socket.on('disconnect', () => setLiveStatus('connecting'));
+        socket.on('connect_error', () => setLiveStatus('connecting'));
+
+        socket.on('sorter-caja-scan', (payload) => {
+          const prepack = normalizeCajaScan(payload);
+          if (prepack) processScan(prepack);
+        });
+      } catch {
+        if (!cancelled) setLiveStatus('demo');
+      }
+    })();
+
     return () => {
       cancelled = true;
-      if (socket) socket.disconnect();
+      socket?.disconnect();
     };
-  }, []);
+  }, [processScan]);
+
+  const handleScan = useCallback(() => {
+    if (scanning) return;
+    setScanning(true);
+    const prepack = demoPrepacks[cursor % demoPrepacks.length];
+    processScan(prepack);
+    setCursor((c) => c + 1);
+    setTimeout(() => setScanning(false), 300);
+  }, [cursor, demoPrepacks, processScan, scanning]);
 
   const bayColor = current
     ? BAY_COLORS[current.bahiaActual] || '#6b7280'
@@ -57,7 +103,9 @@ export function CajaSorterScreen() {
             Arco RFID post-sorter - Bahia a Caja
           </div>
           <div className="font-mono text-[10px] uppercase tracking-industrial text-ink-400 truncate">
-            El backend recibe el EPC y resuelve la caja destino
+            {liveStatus === 'live'
+              ? 'Lecturas EMPAQUETADO en tiempo real'
+              : `Demo fija: el prepack ya cayo en Bahia ${DEMO_BAY_ID}; este arco decide la caja`}
           </div>
         </div>
 
@@ -68,14 +116,28 @@ export function CajaSorterScreen() {
           </Metric>
 
           <Metric icon={<IconBolt size={14} color="currentColor" />} colorCls="text-rfid dark:text-blue-300">
-            <span className="font-mono text-base font-bold leading-none">{connected ? 'Live' : 'Off'}</span>
+            <span className="font-mono text-base font-bold leading-none">
+              {liveStatus === 'live' ? 'Live' : 'Demo'}
+            </span>
             <span className="font-mono text-[8px] uppercase tracking-industrial text-ink-400 block mt-0.5">RFID</span>
           </Metric>
 
-          <div className="hidden sm:flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-flow-ring animate-pulse" />
-            <span className="font-mono text-[10px] uppercase tracking-industrial text-flow dark:text-flow-ring">
-              En vivo
+          <div className="flex items-center gap-1.5">
+            <span
+              className={
+                'w-1.5 h-1.5 rounded-full animate-pulse ' +
+                (liveStatus === 'live' ? 'bg-flow-ring' : 'bg-attention')
+              }
+            />
+            <span
+              className={
+                'font-mono text-[10px] uppercase tracking-industrial ' +
+                (liveStatus === 'live'
+                  ? 'text-flow dark:text-flow-ring'
+                  : 'text-attention dark:text-attention-ring')
+              }
+            >
+              {liveStatus === 'live' ? 'En vivo' : liveStatus === 'demo' ? 'Demo' : 'Conectando'}
             </span>
           </div>
         </div>
@@ -117,6 +179,54 @@ export function CajaSorterScreen() {
       </footer>
     </div>
   );
+}
+
+function normalizeCajaScan(payload) {
+  if (!payload) return null;
+
+  const tag = payload.tag || {};
+  const tienda = payload.tienda || tag.tienda || null;
+  const epc = payload.epc || tag.epc;
+  if (!epc) return null;
+
+  const correctBay = parseBayNumber(
+    payload.bahiaActual ||
+      payload.bahia ||
+      tag.correctBay ||
+      tienda?.bahia_asignada
+  );
+  const cajaDestino = parseCajaNumber(payload.cajaDestino || payload.caja_id);
+
+  return {
+    epc,
+    scanId: payload.lectura_id || payload.id || `${epc}-${payload.timestamp || Date.now()}`,
+    orden_id: payload.orden_id || tag.orden_id || tag.pedido_id || '---',
+    producto: payload.producto || tag.producto || tag.sku || 'Prepack sin detalle',
+    tienda,
+    correctBay: correctBay || 0,
+    cajaDestino: cajaDestino || 1,
+    color: tag.color || '—',
+    talla: tag.talla || '—',
+    total_prendas: Number(tag.cantidad_piezas) || 1,
+    qa_fallido: Boolean(tag.qa_fallido),
+    tipo_flujo: tag.tipo_flujo || 'CROSS_DOCK',
+  };
+}
+
+function parseBayNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return null;
+  const match = value.match(/\d+/);
+  return match ? Number(match[0]) : null;
+}
+
+function parseCajaNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value !== 'string') return null;
+  const match = value.match(/CAJA-(\d+)|C(\d+)|\b(\d+)\b/i);
+  if (!match) return null;
+  const n = Number(match[1] || match[2] || match[3]);
+  return Number.isFinite(n) ? n : null;
 }
 
 function Metric({ icon, colorCls, children }) {
