@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   BAY_COLORS,
   DEMO_BAY_ID,
-  getPrepacksForDemoBay,
 } from '../data/demoData.js';
 import { IconScan, IconSigma, IconBolt } from '../components/Icons.jsx';
 
@@ -12,23 +11,9 @@ function fmtTime(ts) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-function scanToPrepack(payload) {
-  return {
-    ...payload,
-    id: `${payload.epc}-${payload.timestamp || Date.now()}`,
-    scannedAt: payload.timestamp ? new Date(payload.timestamp).getTime() : Date.now(),
-    correctBay: payload.bahiaActual,
-    bayNumber: payload.bahiaActual,
-    orden_id: payload.orden_id,
-    producto: payload.producto,
-  };
-}
-
 export function CajaSorterScreen() {
   const [current, setCurrent] = useState(null);
   const [history, setHistory] = useState([]);
-  const [cursor, setCursor] = useState(0);
-  const [scanning, setScanning] = useState(false);
   const [liveStatus, setLiveStatus] = useState('connecting');
 
   const processScan = useCallback((prepack) => {
@@ -81,15 +66,6 @@ export function CajaSorterScreen() {
       socket?.disconnect();
     };
   }, [processScan]);
-
-  const handleScan = useCallback(() => {
-    if (scanning) return;
-    setScanning(true);
-    const prepack = demoPrepacks[cursor % demoPrepacks.length];
-    processScan(prepack);
-    setCursor((c) => c + 1);
-    setTimeout(() => setScanning(false), 300);
-  }, [cursor, demoPrepacks, processScan, scanning]);
 
   const bayColor = current
     ? BAY_COLORS[current.bahiaActual] || '#6b7280'
@@ -204,6 +180,7 @@ function normalizeCajaScan(payload) {
     producto: payload.producto || tag.producto || tag.sku || 'Prepack sin detalle',
     tienda,
     correctBay: correctBay || 0,
+    bahiaActual: correctBay || 0,
     cajaDestino: cajaDestino || 1,
     color: tag.color || '—',
     talla: tag.talla || '—',
@@ -223,9 +200,13 @@ function parseBayNumber(value) {
 function parseCajaNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value !== 'string') return null;
-  const match = value.match(/CAJA-(\d+)|C(\d+)|\b(\d+)\b/i);
-  if (!match) return null;
-  const n = Number(match[1] || match[2] || match[3]);
+  const cajaMatch = value.match(/CAJA-(\d+)/i);
+  if (cajaMatch) return Number(cajaMatch[1]);
+  const compactMatch = value.match(/\bC(\d+)\b/i);
+  if (compactMatch) return Number(compactMatch[1]);
+  const numberMatch = value.match(/\b(\d+)\b/);
+  if (!numberMatch) return null;
+  const n = Number(numberMatch[1]);
   return Number.isFinite(n) ? n : null;
 }
 
