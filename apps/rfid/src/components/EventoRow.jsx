@@ -1,5 +1,5 @@
 import { formatHora, epcCorto } from '../utils/format.js';
-import { ETAPA_COLORS, ETAPA_LABELS } from '../data/demoOCs.js';
+import { ETAPA_COLORS, ETAPA_LABELS } from '../data/etapas.js';
 
 /**
  * One row in the Bitácora event stream. Five columns:
