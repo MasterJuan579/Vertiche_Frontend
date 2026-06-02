@@ -57,21 +57,40 @@ export function AppShell({
         {/* Nav */}
         <nav className="flex-1 px-2 py-4">
           {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.end}
-              className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2 rounded-card text-sm font-medium mb-0.5 transition-colors ${
-                  isActive
-                    ? 'bg-ink-50 dark:bg-ink-600 text-ink-700 dark:text-ink-100'
-                    : 'text-ink-400 dark:text-ink-300 hover:text-ink-700 dark:hover:text-ink-100 hover:bg-ink-50 dark:hover:bg-ink-600'
-                }`
-              }
-            >
-              <span className="w-1 h-1 rounded-full bg-current" />
-              {item.label}
-            </NavLink>
+            item.type === 'select' ? (
+              <label key={item.key || item.label} className="block px-3 py-2 mb-2">
+                <span className="block mb-1.5 text-[10px] font-display font-semibold uppercase tracking-industrial text-ink-400 dark:text-ink-300">
+                  {item.label}
+                </span>
+                <select
+                  value={item.value}
+                  onChange={(event) => item.onChange?.(event.target.value)}
+                  className="w-full h-9 rounded-card border border-ink-100 bg-white px-2.5 font-mono text-xs font-bold text-ink-700 outline-none transition-colors focus:border-rfid dark:border-ink-600 dark:bg-ink-700 dark:text-ink-100"
+                >
+                  {(item.options || []).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  `flex items-center gap-2.5 px-3 py-2 rounded-card text-sm font-medium mb-0.5 transition-colors ${
+                    isActive
+                      ? 'bg-ink-50 dark:bg-ink-600 text-ink-700 dark:text-ink-100'
+                      : 'text-ink-400 dark:text-ink-300 hover:text-ink-700 dark:hover:text-ink-100 hover:bg-ink-50 dark:hover:bg-ink-600'
+                  }`
+                }
+              >
+                <span className="w-1 h-1 rounded-full bg-current" />
+                {item.label}
+              </NavLink>
+            )
           ))}
         </nav>
 

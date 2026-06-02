@@ -1,6 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BAY_COLORS } from '../data/demoData.js';
-import { connectRealtime } from '../api/rfid.js';
 import { PrepackDetailBar } from '../components/PrepackDetailBar.jsx';
 import { ScanHistory } from '../components/ScanHistory.jsx';
 import {
@@ -20,43 +19,13 @@ function parseBahia(s) {
   return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
-function lecturaToPrepack(payload) {
-  const tag = payload.tag || {};
-  const actualBay = parseBahia(payload.bahia);
-  const correctBay = parseBahia(tag.tienda?.bahia_asignada) || actualBay || 1;
-  const bayNumber = actualBay || correctBay;
-  const cantidad = tag.cantidad_piezas || 1;
-
-  return {
-    id: `${payload.id || payload.epc}-${payload.timestamp || Date.now()}`,
-    epc: payload.epc,
-    scannedAt: payload.timestamp ? new Date(payload.timestamp).getTime() : Date.now(),
-    bayNumber,
-    correctBay,
-    cajaDestino: null,
-    isMisrouted: !!actualBay && actualBay !== correctBay,
-    orden_id: tag.orden_id || null,
-    producto: tag.producto || tag.sku || 'Prepack RFID',
-    proveedor: tag.proveedor?.nombre || null,
-    tienda: tag.tienda || tag.Tienda || null,
-    color: tag.color || null,
-    talla: tag.talla || null,
-    cantidad_piezas: cantidad,
-    prendas: [{ color: tag.color || 'N/D', talla: tag.talla || 'N/D', cantidad }],
-    qa_fallido: tag.qa_fallido || false,
-    tipo_flujo: tag.tipo_flujo || 'CROSS_DOCK',
-  };
-}
-
 export function SorterScreen() {
   const [current, setCurrent] = useState(null);
   const [history, setHistory] = useState([]);
-  const [scanning, setScanning] = useState(false);
   const [liveStatus, setLiveStatus] = useState('connecting');
   const [scanRate, setScanRate] = useState(0);
   const [totalScanned, setTotalScanned] = useState(0);
   const [selected, setSelected] = useState(null);
-  const [connected, setConnected] = useState(false);
 
   const scanTimesRef = useRef([]);
 
@@ -71,11 +40,18 @@ export function SorterScreen() {
 
   const processScan = useCallback((prepack) => {
     if (!prepack) return;
+    const now = Date.now();
     const scan = {
       ...prepack,
-      id: prepack.scanId || `${prepack.epc}-${Date.now()}`,
-      scannedAt: Date.now(),
+      id: prepack.scanId || `${prepack.epc}-${now}`,
+      scannedAt: now,
     };
+    scanTimesRef.current = [...scanTimesRef.current, now].filter((t) => now - t < 60000);
+    setScanRate(scanTimesRef.current.length);
+    setTotalScanned((n) => n + 1);
+    setCurrent(scan);
+    setSelected(scan);
+    setHistory((prev) => [scan, ...prev].slice(0, 24));
   }, []);
 
   useEffect(() => {
@@ -117,15 +93,6 @@ export function SorterScreen() {
       socket?.disconnect();
     };
   }, [processScan]);
-
-  const handleScan = useCallback(() => {
-    if (scanning) return;
-    setScanning(true);
-    const next = DEMO_PREPACKS[cursor % DEMO_PREPACKS.length];
-    processScan(next);
-    setCursor((c) => c + 1);
-    setTimeout(() => setScanning(false), 300);
-  }, [scanning, cursor, processScan]);
 
   const bayColor = current
     ? BAY_COLORS[current.bayNumber] || '#6b7280'
