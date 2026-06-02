@@ -5,9 +5,10 @@ import { NivelBadge } from '../components/NivelBadge.jsx';
 import {
   crearInspeccion,
   escanearPrepack,
+  fetchCatalogoDefectos,
   fetchPendientes,
 } from '../api/proveedores.js';
-import { DEFECT_TYPES, MOCK_EPCS } from '../data/demoData.js';
+import { DEFECT_ICONS, DEFECT_TYPES, MOCK_EPCS } from '../data/demoData.js';
 
 // Mapea la decisión interna del UI al enum del backend.
 const RESULTADO_BACKEND = {
@@ -32,6 +33,23 @@ const F_SUBMIT   = 'submit';
 
 export function OperatorScreen() {
   const { session } = useAuth();
+
+  // ─── Catálogo de defectos (cargado desde backend, fallback a DEFECT_TYPES) ───
+  const [availableDefects, setAvailableDefects] = useState(DEFECT_TYPES);
+
+  useEffect(() => {
+    fetchCatalogoDefectos()
+      .then((data) => {
+        setAvailableDefects(
+          data
+            .filter((d) => d.activo)
+            .map((d) => ({ cat: d.nombre, icon: DEFECT_ICONS[d.nombre] || '⚠️' }))
+        );
+      })
+      .catch(() => {
+        // Backend no disponible → se mantiene DEFECT_TYPES hardcodeado
+      });
+  }, []);
 
   // ─── Pendientes ────────────────────────────────────
   const [pendientes, setPendientes] = useState([]);
@@ -129,16 +147,15 @@ export function OperatorScreen() {
     setSubmitError(null);
 
     const isApproved = decision === 'approve';
-    let defecto_tipo = null;
-    let observacion  = null;
+    let defectos    = [];
+    let observacion = null;
 
     if (!isApproved) {
-      const finalDefects = defectTypes.map((t) =>
+      defectos = defectTypes.map((t) =>
         t === 'Otro (especificar)' && otherText ? otherText : t
       );
-      // El backend espera defecto_tipo (singular). Si hay varios, los unimos.
-      defecto_tipo = finalDefects.length > 0 ? finalDefects.join(', ') : null;
-      observacion  = notes.trim() || null;
+      // El texto libre de "Otro" también va en observacion para trazabilidad en backend.
+      observacion = notes.trim() || (otherText.trim() ? otherText.trim() : null);
     }
 
     const payload = {
@@ -146,7 +163,7 @@ export function OperatorScreen() {
       proveedor_id: scanData?.proveedor_id ?? scanData?.proveedorId ?? null,
       operador_id:  session?.user?.sub,
       resultado:    RESULTADO_BACKEND[decision],
-      defecto_tipo,
+      defectos,
       observacion,
       fecha:        new Date().toISOString(),
     };
@@ -199,6 +216,7 @@ export function OperatorScreen() {
 
       {(flow === F_INSPECT || flow === F_SUBMIT) && (
         <InspectionForm
+          availableDefects={availableDefects}
           epc={scannedEpc}
           defectTypes={defectTypes}
           onToggleDefect={toggleDefect}
@@ -469,7 +487,7 @@ function BigResultRevisar({ epc, onCancel, onStartInspection }) {
 // ════════════════════════════════════════════════════════════════════
 
 function InspectionForm({
-  epc, defectTypes, onToggleDefect, otherText, setOtherText, notes, setNotes,
+  availableDefects, epc, defectTypes, onToggleDefect, otherText, setOtherText, notes, setNotes,
   onSubmit, onCancel, submitting, error,
 }) {
   const hasOther = defectTypes.includes('Otro (especificar)');
@@ -508,7 +526,7 @@ function InspectionForm({
           Tipos de defecto (déjalo vacío si la inspección sale OK)
         </div>
         <div className="grid grid-cols-4 gap-2">
-          {DEFECT_TYPES.map((d) => {
+          {availableDefects.map((d) => {
             const selected = defectTypes.includes(d.cat);
             return (
               <button

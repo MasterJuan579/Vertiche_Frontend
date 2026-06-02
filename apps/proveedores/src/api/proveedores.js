@@ -52,11 +52,24 @@ export async function escanearPrepack(epc) {
 }
 
 /**
+ * Catálogo de tipos de defecto con criticidad y penalización.
+ * Permite que backend ajuste penalizaciones sin necesidad de redesplegar el frontend.
+ * Cada item: { id, nombre, criticidad, penalizacion, activo }
+ */
+export async function fetchCatalogoDefectos() {
+  const res = await fetch(`${API_URL}/CatalogoDefecto/listar`);
+  if (!res.ok) {
+    throw new Error(`Error ${res.status} al obtener catálogo de defectos`);
+  }
+  return res.json();
+}
+
+/**
  * Registra una inspección QA (un siniestro reportado contra un prepack).
  *
  * Payload esperado:
- *   tag_epc, proveedor_id, operador_id, resultado ('RECHAZADO' | 'OBSERVADO'),
- *   defecto_tipo, observacion, fecha (ISO string)
+ *   tag_epc, proveedor_id, operador_id, resultado ('APROBADO' | 'OBSERVADO' | 'RECHAZADO'),
+ *   defectos (string[]), observacion, fecha (ISO string)
  */
 export async function crearInspeccion(payload) {
   const res = await fetch(`${API_URL}/InspeccionQA/crearInspeccion`, {
