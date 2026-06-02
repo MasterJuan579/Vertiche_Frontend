@@ -71,6 +71,22 @@ export async function fetchCatalogoDefectos() {
  *   tag_epc, proveedor_id, operador_id, resultado ('APROBADO' | 'OBSERVADO' | 'RECHAZADO'),
  *   defectos (string[]), observacion, fecha (ISO string)
  */
+export async function fetchTurnoResumen() {
+  const res = await fetch(`${API_URL}/Turno/resumen`);
+  if (!res.ok) {
+    throw new Error(`Error ${res.status} al obtener resumen del turno`);
+  }
+  return res.json();
+}
+
+export async function fetchPerfilProveedor(id) {
+  const res = await fetch(`${API_URL}/Proveedor/${id}/perfil`);
+  if (!res.ok) {
+    throw new Error(`Error ${res.status} al obtener perfil del proveedor`);
+  }
+  return res.json();
+}
+
 export async function crearInspeccion(payload) {
   const res = await fetch(`${API_URL}/InspeccionQA/crearInspeccion`, {
     method: 'POST',
