@@ -290,7 +290,26 @@ function PrepackCell({ prepack, estado, onClick }) {
     : 'bg-flow/10 border-flow-ring/40 dark:bg-flow/15 dark:border-flow-ring/40';
 
   const dotCls = pendiente ? 'bg-ink-300 dark:bg-ink-500' : 'bg-flow-ring';
-  const colorHex = COLORES_PALETA.find(c => normalizeColor(c.nombre) === normalizeColor(prepack.color))?.hex;
+
+  // Un prepack puede ser mixto: prendas = [{ talla, color }, ...]. Las
+  // agrupamos por talla+color para mostrar "2 M Rojo · 3 S Verde · 2 L Azul".
+  const prendas = Array.isArray(prepack.prendas) ? prepack.prendas : [];
+  const esMixto = prendas.length > 0;
+  const grupos = [];
+  if (esMixto) {
+    const mapa = new Map();
+    for (const p of prendas) {
+      const k = `${p.talla}__${p.color}`;
+      mapa.set(k, (mapa.get(k) || 0) + 1);
+    }
+    for (const [k, n] of mapa) {
+      const [talla, color] = k.split('__');
+      grupos.push({ talla, color, n });
+    }
+  }
+  const hexDe = (color) =>
+    COLORES_PALETA.find((c) => normalizeColor(c.nombre) === normalizeColor(color))?.hex;
+  const colorHex = hexDe(prepack.color);
 
   return (
     <button
@@ -316,14 +335,35 @@ function PrepackCell({ prepack, estado, onClick }) {
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-1.5 text-[10px] text-ink-500 dark:text-ink-300 mb-1">
-        <span className="font-semibold">{prepack.talla}</span>
-        <span>·</span>
-        {colorHex && <span className="w-2.5 h-2.5 rounded-full border border-ink-200 dark:border-ink-500" style={{ background: colorHex }} />}
-        <span>{prepack.color || '—'}</span>
-        <span>·</span>
-        <span>{prepack.cantidad_piezas}p</span>
-      </div>
+
+      {esMixto && grupos.length > 1 ? (
+        // Prepack surtido: lista cada talla+color con su cantidad.
+        <div className="mb-1 space-y-0.5">
+          {grupos.map((g, i) => {
+            const hex = hexDe(g.color);
+            return (
+              <div key={i} className="flex items-center gap-1.5 text-[10px] text-ink-500 dark:text-ink-300">
+                <span className="font-semibold tabular-nums">{g.n}</span>
+                <span className="font-semibold">{g.talla}</span>
+                {hex && <span className="w-2.5 h-2.5 rounded-full border border-ink-200 dark:border-ink-500" style={{ background: hex }} />}
+                <span className="truncate">{g.color || '—'}</span>
+              </div>
+            );
+          })}
+          <div className="text-[9px] text-ink-400 pt-0.5">{prepack.cantidad_piezas} piezas en total</div>
+        </div>
+      ) : (
+        // Prepack simple: una sola talla/color.
+        <div className="flex items-center gap-1.5 text-[10px] text-ink-500 dark:text-ink-300 mb-1">
+          <span className="font-semibold">{prepack.talla}</span>
+          <span>·</span>
+          {colorHex && <span className="w-2.5 h-2.5 rounded-full border border-ink-200 dark:border-ink-500" style={{ background: colorHex }} />}
+          <span>{prepack.color || '—'}</span>
+          <span>·</span>
+          <span>{prepack.cantidad_piezas}p</span>
+        </div>
+      )}
+
       <div className="flex items-center gap-1 text-[10px] text-ink-400 truncate">
         <StoreIcon size={11} />
         <span className="truncate">{prepack.Tienda?.nombre || prepack.tienda_id}</span>
@@ -536,6 +576,7 @@ function ModalAsignarEPC({ prepack, onClose, onAsignar }) {
     } finally {
       setEnviando(false);
     }
+    
   };
 
   return (
@@ -555,9 +596,26 @@ function ModalAsignarEPC({ prepack, onClose, onAsignar }) {
 
           <div className="rounded-card border border-ink-100 dark:border-ink-600 bg-ink-50 dark:bg-ink-800 p-3">
             <div className="text-[12px] text-ink-700 dark:text-ink-100 font-semibold mb-1">{prepack.sku}</div>
-            <div className="text-[11px] text-ink-500 dark:text-ink-300 mb-1">
-              {prepack.talla} · {prepack.color || '—'} · {prepack.cantidad_piezas} pzs
-            </div>
+            {Array.isArray(prepack.prendas) && prepack.prendas.length > 1 ? (
+              <div className="text-[11px] text-ink-500 dark:text-ink-300 mb-1 space-y-0.5">
+                {(() => {
+                  const mapa = new Map();
+                  for (const p of prepack.prendas) {
+                    const k = `${p.talla}__${p.color}`;
+                    mapa.set(k, (mapa.get(k) || 0) + 1);
+                  }
+                  return [...mapa.entries()].map(([k, n], i) => {
+                    const [talla, color] = k.split('__');
+                    return <div key={i}>{n} · {talla} · {color || '—'}</div>;
+                  });
+                })()}
+                <div className="text-[10px] text-ink-400 pt-0.5">{prepack.cantidad_piezas} piezas en total</div>
+              </div>
+            ) : (
+              <div className="text-[11px] text-ink-500 dark:text-ink-300 mb-1">
+                {prepack.talla} · {prepack.color || '—'} · {prepack.cantidad_piezas} pzs
+              </div>
+            )}
             <div className="text-[11px] text-ink-400">
               Destino: {prepack.Tienda?.nombre || prepack.tienda_id}
             </div>
@@ -618,22 +676,64 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
     modelo: '',
     numero_palets: 1,
   });
-  const [renglones, setRenglones] = useState([
-    { sku: '', talla: 'M', color: '', piezas_por_prepack: 12, cantidad: 1, tienda_id: tiendas[0]?.tienda_id || '' },
-  ]);
+
+  // Un prepack = una tienda destino + N copias idénticas + un desglose de
+  // líneas. Cada línea es (sku, talla, color, cantidad), de modo que un
+  // prepack puede mezclar productos, tallas y colores. Ejemplo:
+  //   Prepack → Tienda CDMX-POL → 2 playeras M rojas + 3 S verdes + 2 L azules
+  const nuevaLinea = (sku = '') => ({ sku, talla: 'M', color: '', cantidad: 1 });
+  const nuevoPrepack = () => ({
+    tienda_id: tiendas[0]?.tienda_id || '',
+    copias: 1,
+    lineas: [nuevaLinea()],
+  });
+
+  const [prepacks, setPrepacks] = useState([nuevoPrepack()]);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState(null);
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-  const setReng = (idx, k, v) => setRenglones((arr) => arr.map((r, i) => i === idx ? { ...r, [k]: v } : r));
-  const addReng = () => setRenglones((arr) => [
-    ...arr,
-    { sku: '', talla: 'M', color: '', piezas_por_prepack: 12, cantidad: 1, tienda_id: tiendas[0]?.tienda_id || '' },
-  ]);
-  const delReng = (idx) => setRenglones((arr) => arr.length <= 1 ? arr : arr.filter((_, i) => i !== idx));
 
-  const totalPrepacks = renglones.reduce((acc, r) => acc + (Number(r.cantidad) || 0), 0);
-  const totalPiezas = renglones.reduce((acc, r) => acc + (Number(r.cantidad) || 0) * (Number(r.piezas_por_prepack) || 0), 0);
+  // ── Mutadores de prepacks ──────────────────────────────────
+  const setPrepack = (pi, k, v) =>
+    setPrepacks((arr) => arr.map((p, i) => (i === pi ? { ...p, [k]: v } : p)));
+  const addPrepack = () => setPrepacks((arr) => [...arr, nuevoPrepack()]);
+  const delPrepack = (pi) =>
+    setPrepacks((arr) => (arr.length <= 1 ? arr : arr.filter((_, i) => i !== pi)));
+
+  // ── Mutadores de líneas dentro de un prepack ───────────────
+  const setLinea = (pi, li, k, v) =>
+    setPrepacks((arr) =>
+      arr.map((p, i) =>
+        i === pi
+          ? { ...p, lineas: p.lineas.map((l, j) => (j === li ? { ...l, [k]: v } : l)) }
+          : p
+      )
+    );
+  const addLinea = (pi) =>
+    setPrepacks((arr) =>
+      arr.map((p, i) => {
+        if (i !== pi) return p;
+        const ultimoSku = p.lineas[p.lineas.length - 1]?.sku || '';
+        return { ...p, lineas: [...p.lineas, nuevaLinea(ultimoSku)] };
+      })
+    );
+  const delLinea = (pi, li) =>
+    setPrepacks((arr) =>
+      arr.map((p, i) =>
+        i === pi && p.lineas.length > 1
+          ? { ...p, lineas: p.lineas.filter((_, j) => j !== li) }
+          : p
+      )
+    );
+
+  // Piezas de un prepack = suma de cantidades de sus líneas.
+  const piezasDe = (p) => p.lineas.reduce((acc, l) => acc + (Number(l.cantidad) || 0), 0);
+  const totalPrepacks = prepacks.reduce((acc, p) => acc + (Number(p.copias) || 0), 0);
+  const totalPiezas = prepacks.reduce(
+    (acc, p) => acc + (Number(p.copias) || 0) * piezasDe(p),
+    0
+  );
 
   const handle = async () => {
     setError(null);
@@ -641,10 +741,24 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
       setError('Proveedor y nombre del producto son requeridos.');
       return;
     }
-    for (const [i, r] of renglones.entries()) {
-      if (!r.sku.trim() || !r.tienda_id || Number(r.cantidad) <= 0 || Number(r.piezas_por_prepack) <= 0) {
-        setError(`Renglón ${i + 1}: SKU, tienda, cantidad y piezas son requeridos.`);
+    for (const [i, p] of prepacks.entries()) {
+      if (!p.tienda_id) {
+        setError(`Prepack ${i + 1}: selecciona la tienda destino.`);
         return;
+      }
+      if (Number(p.copias) <= 0) {
+        setError(`Prepack ${i + 1}: el número de copias debe ser al menos 1.`);
+        return;
+      }
+      if (p.lineas.length === 0) {
+        setError(`Prepack ${i + 1}: agrega al menos una línea (talla/color).`);
+        return;
+      }
+      for (const [j, l] of p.lineas.entries()) {
+        if (!l.sku.trim() || !l.talla || !l.color.trim() || Number(l.cantidad) <= 0) {
+          setError(`Prepack ${i + 1}, línea ${j + 1}: SKU, talla, color y cantidad son requeridos.`);
+          return;
+        }
       }
     }
     setEnviando(true);
@@ -654,13 +768,16 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
         nombre_producto: form.nombre_producto.trim(),
         modelo: form.modelo.trim() || null,
         numero_palets: parseInt(form.numero_palets, 10),
-        detalles: renglones.map((r) => ({
-          sku: r.sku.trim(),
-          talla: r.talla,
-          color: r.color.trim() || null,
-          piezas_por_prepack: parseInt(r.piezas_por_prepack, 10),
-          cantidad: parseInt(r.cantidad, 10),
-          tienda_id: r.tienda_id,
+        // Cada prepack viaja con su tienda, copias y el desglose de líneas.
+        detalles: prepacks.map((p) => ({
+          tienda_id: p.tienda_id,
+          cantidad: parseInt(p.copias, 10),
+          lineas: p.lineas.map((l) => ({
+            sku: l.sku.trim(),
+            talla: l.talla,
+            color: l.color.trim(),
+            cantidad: parseInt(l.cantidad, 10),
+          })),
         })),
       });
       await onCreada({ ordenCompra: res.ordenCompra });
@@ -718,52 +835,37 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
             </FormField>
           </div>
 
-          {/* Renglones */}
+          {/* Prepacks */}
           <div className="border-t border-ink-100 dark:border-ink-600 pt-3">
             <div className="flex items-center justify-between mb-2">
               <div className="font-mono text-[10px] font-bold uppercase tracking-industrial text-ink-400">
-                Desglose de prepacks ({renglones.length} renglón{renglones.length !== 1 ? 'es' : ''})
+                Prepacks ({prepacks.length})
               </div>
-              <button type="button" onClick={addReng} className="px-2 py-1 rounded-card text-[11px] font-semibold bg-rfid/10 text-rfid border border-rfid/30 hover:bg-rfid/20 dark:bg-rfid/20 dark:text-blue-300">
-                + Agregar renglón
+              <button type="button" onClick={addPrepack} className="px-2 py-1 rounded-card text-[11px] font-semibold bg-rfid/10 text-rfid border border-rfid/30 hover:bg-rfid/20 dark:bg-rfid/20 dark:text-blue-300">
+                + Agregar prepack
               </button>
             </div>
 
-            <div className="space-y-2">
-              {renglones.map((r, idx) => (
-                <div key={idx} className="grid grid-cols-[1fr_60px_80px_70px_70px_1fr_28px] gap-2 items-end p-2 rounded-card bg-ink-50 dark:bg-ink-800">
-                  <FormField label={idx === 0 ? 'SKU' : null} compact required>
-                    <input type="text" placeholder="PLY-001" value={r.sku} onChange={(e) => setReng(idx, 'sku', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100" />
-                  </FormField>
-                  <FormField label={idx === 0 ? 'Talla' : null} compact>
-                    <select value={r.talla} onChange={(e) => setReng(idx, 'talla', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100">
-                      {['XS', 'S', 'M', 'L', 'XL', 'XXL'].map((t) => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </FormField>
-                  <FormField label={idx === 0 ? 'Color' : null} compact>
-                    <ColorPicker value={r.color} onChange={(v) => setReng(idx, 'color', v)} />
-                  </FormField>
-                  <FormField label={idx === 0 ? 'Pzs/prepack' : null} compact required>
-                    <input type="number" min="1" value={r.piezas_por_prepack} onChange={(e) => setReng(idx, 'piezas_por_prepack', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100" />
-                  </FormField>
-                  <FormField label={idx === 0 ? '# Prepacks' : null} compact required>
-                    <input type="number" min="1" value={r.cantidad} onChange={(e) => setReng(idx, 'cantidad', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100" />
-                  </FormField>
-                  <FormField label={idx === 0 ? 'Tienda destino' : null} compact required>
-                    <select value={r.tienda_id} onChange={(e) => setReng(idx, 'tienda_id', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100">
-                      <option value="">Seleccionar...</option>
-                      {tiendas.map((t) => <option key={t.tienda_id} value={t.tienda_id}>{t.tienda_id}</option>)}
-                    </select>
-                  </FormField>
-                  <button type="button" onClick={() => delReng(idx)} disabled={renglones.length <= 1} className="w-7 h-7 rounded flex items-center justify-center text-anomaly hover:bg-anomaly/15 disabled:opacity-30 dark:text-anomaly-ring dark:hover:bg-anomaly/25 mb-1">
-                    ×
-                  </button>
-                </div>
+            <div className="space-y-3">
+              {prepacks.map((p, pi) => (
+                <PrepackCard
+                  key={pi}
+                  index={pi}
+                  prepack={p}
+                  piezas={piezasDe(p)}
+                  tiendas={tiendas}
+                  puedeBorrar={prepacks.length > 1}
+                  onChange={(k, v) => setPrepack(pi, k, v)}
+                  onChangeLinea={(li, k, v) => setLinea(pi, li, k, v)}
+                  onAddLinea={() => addLinea(pi)}
+                  onDelLinea={(li) => delLinea(pi, li)}
+                  onDelete={() => delPrepack(pi)}
+                />
               ))}
             </div>
 
             <div className="mt-3 px-3 py-2 rounded-card bg-rfid/5 border border-rfid/20 text-[12px] text-ink-700 dark:bg-rfid/15 dark:text-ink-100 dark:border-rfid/30">
-              <strong>Total a crear:</strong> {totalPrepacks} prepacks ({totalPiezas} piezas) distribuidos en {form.numero_palets} palet{form.numero_palets > 1 ? 's' : ''}.
+              <strong>Total a crear:</strong> {totalPrepacks} prepack{totalPrepacks !== 1 ? 's' : ''} ({totalPiezas} pieza{totalPiezas !== 1 ? 's' : ''}) distribuidos en {form.numero_palets} palet{form.numero_palets > 1 ? 's' : ''}.
             </div>
           </div>
         </div>
@@ -773,8 +875,91 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
             Cancelar
           </button>
           <button type="button" onClick={handle} disabled={enviando} className="flex-1 px-3 py-2 rounded-card text-[13px] font-semibold bg-rfid text-white hover:bg-blue-700 disabled:opacity-50">
-            {enviando ? 'Creando...' : `Crear OC con ${totalPrepacks} prepacks`}
+            {enviando ? 'Creando...' : `Crear OC con ${totalPrepacks} prepack${totalPrepacks !== 1 ? 's' : ''}`}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// PrepackCard — un prepack con tienda, copias y líneas mixtas
+// ============================================================
+
+const TALLAS_DISPONIBLES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+
+function PrepackCard({
+  index,
+  prepack,
+  piezas,
+  tiendas,
+  puedeBorrar,
+  onChange,
+  onChangeLinea,
+  onAddLinea,
+  onDelLinea,
+  onDelete,
+}) {
+  return (
+    <div className="rounded-card border border-ink-200 dark:border-ink-600 bg-ink-50/60 dark:bg-ink-800/60 overflow-hidden">
+      {/* Encabezado del prepack */}
+      <div className="flex items-end gap-2 px-3 py-2.5 border-b border-ink-100 dark:border-ink-600 bg-white dark:bg-ink-700">
+        <div className="w-7 h-7 shrink-0 rounded-card bg-rfid/10 text-rfid dark:bg-rfid/25 dark:text-blue-300 flex items-center justify-center font-mono text-[12px] font-bold mb-0.5">
+          {index + 1}
+        </div>
+        <div className="flex-1">
+          <FormField label="Tienda destino" compact required>
+            <select value={prepack.tienda_id} onChange={(e) => onChange('tienda_id', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100">
+              <option value="">Seleccionar...</option>
+              {tiendas.map((t) => <option key={t.tienda_id} value={t.tienda_id}>{t.tienda_id}{t.nombre ? ` — ${t.nombre}` : ''}</option>)}
+            </select>
+          </FormField>
+        </div>
+        <div className="w-[90px]">
+          <FormField label="Copias" compact required>
+            <input type="number" min="1" value={prepack.copias} onChange={(e) => onChange('copias', e.target.value)} title="Cuántos prepacks idénticos crear" className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100" />
+          </FormField>
+        </div>
+        <button type="button" onClick={onDelete} disabled={!puedeBorrar} title="Eliminar prepack" className="w-7 h-7 rounded flex items-center justify-center text-anomaly hover:bg-anomaly/15 disabled:opacity-30 dark:text-anomaly-ring dark:hover:bg-anomaly/25 mb-1">
+          ×
+        </button>
+      </div>
+
+      {/* Líneas del prepack */}
+      <div className="px-3 py-2.5 space-y-2">
+        {prepack.lineas.map((l, li) => (
+          <div key={li} className="grid grid-cols-[1fr_72px_96px_72px_28px] gap-2 items-end">
+            <FormField label={li === 0 ? 'SKU / Producto' : null} compact required>
+              <input type="text" placeholder="PLY-001" value={l.sku} onChange={(e) => onChangeLinea(li, 'sku', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100" />
+            </FormField>
+            <FormField label={li === 0 ? 'Talla' : null} compact required>
+              <select value={l.talla} onChange={(e) => onChangeLinea(li, 'talla', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100">
+                {TALLAS_DISPONIBLES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </FormField>
+            <FormField label={li === 0 ? 'Color' : null} compact required>
+              <ColorPicker value={l.color} onChange={(v) => onChangeLinea(li, 'color', v)} />
+            </FormField>
+            <FormField label={li === 0 ? 'Cantidad' : null} compact required>
+              <input type="number" min="1" value={l.cantidad} onChange={(e) => onChangeLinea(li, 'cantidad', e.target.value)} className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100" />
+            </FormField>
+            <button type="button" onClick={() => onDelLinea(li)} disabled={prepack.lineas.length <= 1} title="Eliminar línea" className="w-7 h-7 rounded flex items-center justify-center text-ink-400 hover:bg-anomaly/15 hover:text-anomaly disabled:opacity-30 dark:hover:bg-anomaly/25 mb-1">
+              ×
+            </button>
+          </div>
+        ))}
+
+        <div className="flex items-center justify-between pt-1">
+          <button type="button" onClick={onAddLinea} className="px-2 py-1 rounded text-[11px] font-semibold text-rfid hover:bg-rfid/10 dark:text-blue-300 dark:hover:bg-rfid/20">
+            + Agregar línea
+          </button>
+          <div className="text-[11px] text-ink-400">
+            {piezas} pieza{piezas !== 1 ? 's' : ''} por prepack
+            {Number(prepack.copias) > 1 && (
+              <span className="text-ink-500 dark:text-ink-300"> · ×{prepack.copias} copias</span>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -898,3 +1083,4 @@ function FormField({ label, required, compact, children }) {
     </div>
   );
 }
+
