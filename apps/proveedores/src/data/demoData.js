@@ -177,7 +177,7 @@ export const CARGO_SCENARIOS = [
   ]},
 ];
 
-// Tipos de defecto para el flujo de siniestro
+// Tipos de defecto para el flujo de siniestro (fallback si /CatalogoDefecto/listar falla)
 export const DEFECT_TYPES = [
   { cat: 'Mala calidad en la tela', icon: '🧵' },
   { cat: 'Ruptura o rasgadura',     icon: '✂️' },
@@ -188,6 +188,18 @@ export const DEFECT_TYPES = [
   { cat: 'SKU equivocado',          icon: '🔢' },
   { cat: 'Otro (especificar)',      icon: '✏️' },
 ];
+
+// Mapa nombre → ícono para combinar con la respuesta del backend (/CatalogoDefecto/listar)
+export const DEFECT_ICONS = {
+  'Mala calidad en la tela': '🧵',
+  'Ruptura o rasgadura':     '✂️',
+  'Mancha o suciedad':       '🟤',
+  'Costura defectuosa':      '🪡',
+  'Etiqueta incorrecta':     '🏷️',
+  'Cantidad faltante':       '📉',
+  'SKU equivocado':          '🔢',
+  'Otro (especificar)':      '✏️',
+};
 
 // EPCs reales seedeados en la tabla Tag del backend (DEV).
 // Se eligen de aquí en orden secuencial cuando el inspector simula una
@@ -217,28 +229,30 @@ export const MOCK_EPCS = [
 
 /**
  * Cuántos prepacks revisar según rating y cantidad total.
- *   Elite (≥4.5): 34% (mínimo 1, máximo qty)
- *   Media (≥2.5): 67%
- *   Baja  (>0):   100%
- *   Nuevo (=0):   50%
+ *   Elite (≥4.5): 15%, máx 4 prepacks
+ *   Media (≥3.5): 30%, máx 8 prepacks
+ *   Baja  (>0):   50%, máx 12 prepacks
+ *   Nuevo (=0):   15%, máx 4 prepacks (período de evaluación)
  */
 export function calcSampleSize(stars, qty) {
-  const pct = stars >= 4.5 ? 0.34 : stars >= 2.5 ? 0.67 : stars > 0 ? 1 : 0.5;
-  return Math.max(1, Math.min(qty, Math.ceil(qty * pct)));
+  if (stars >= 4.5) return Math.max(1, Math.min(4,  Math.ceil(qty * 0.15)));
+  if (stars >= 3.5) return Math.max(1, Math.min(8,  Math.ceil(qty * 0.30)));
+  if (stars > 0)    return Math.max(1, Math.min(12, Math.ceil(qty * 0.50)));
+  return Math.max(1, Math.min(4, Math.ceil(qty * 0.15)));
 }
 
 export function sampleHint(stars) {
-  if (stars >= 4.5) return 'Muestreo 34% (1 de 3) · reputación ELITE · inspección rápida';
-  if (stars >= 2.5) return 'Muestreo 67% (2 de 3) · reputación MEDIA · inspección normal';
-  if (stars > 0)    return 'Muestreo 100% · reputación BAJA · inspección reforzada';
-  return 'Muestreo 50% · proveedor sin historial (nuevo)';
+  if (stars >= 4.5) return 'Muestreo 15% · máx 4 prepacks · reputación ELITE · inspección rápida';
+  if (stars >= 3.5) return 'Muestreo 30% · máx 8 prepacks · reputación MEDIA · inspección normal';
+  if (stars > 0)    return 'Muestreo 50% · máx 12 prepacks · reputación BAJA · inspección reforzada';
+  return 'Muestreo 15% · máx 4 prepacks · proveedor sin historial (nuevo)';
 }
 
 export function accionSistema(stars) {
-  if (stars >= 4.5) return { label: 'FLUJO LIBRE',      hint: 'Muestreo 34% · Inspección rápida sin retención', cls: 'elite' };
-  if (stars >= 2.5) return { label: 'STOP ALEATORIO',   hint: 'Muestreo 67% · Retención preventiva',            cls: 'media' };
-  if (stars > 0)    return { label: 'STOP OBLIGATORIO', hint: 'Inspección 100% manual · Riesgo alto',           cls: 'baja'  };
-  return              { label: 'PROVEEDOR NUEVO',       hint: 'Período de evaluación · 50% inspección',         cls: 'nuevo' };
+  if (stars >= 4.5) return { label: 'FLUJO LIBRE',      hint: 'Muestreo 15% · máx 4 prepacks · inspección rápida',     cls: 'elite' };
+  if (stars >= 3.5) return { label: 'STOP ALEATORIO',   hint: 'Muestreo 30% · máx 8 prepacks · retención preventiva',  cls: 'media' };
+  if (stars > 0)    return { label: 'STOP OBLIGATORIO', hint: 'Muestreo 50% · máx 12 prepacks · riesgo alto',          cls: 'baja'  };
+  return              { label: 'PROVEEDOR NUEVO',       hint: 'Período de evaluación · 15% inspección · máx 4 prepacks', cls: 'nuevo' };
 }
 
 // Mapa de colores (alineado con rfid y sorter)
