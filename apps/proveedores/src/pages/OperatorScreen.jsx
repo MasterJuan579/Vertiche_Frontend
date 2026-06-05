@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@vertiche/design-system';
 import { OperatorBar } from '../components/OperatorBar.jsx';
 import { NivelBadge } from '../components/NivelBadge.jsx';
@@ -10,13 +10,10 @@ import {
   fetchPendientes,
 } from '../api/proveedores.js';
 import { DEFECT_ICONS, DEFECT_TYPES, MOCK_EPCS } from '../data/demoData.js';
+import { useScanSocket } from '../lib/useScanSocket.js';
 
-// Mapea la decisión interna del UI al enum del backend.
-const RESULTADO_BACKEND = {
-  approve:   'APROBADO',
-  retrabajo: 'RETRABAJO',
-  reject:    'RECHAZADO',
-};
+// Tiempo (ms) que se muestra el banner "NO SE ESCANEA" antes de regresar a idle.
+const PASA_AUTO_DISMISS_MS = 3000;
 
 // Máquina de estados:
 //   idle     → mostrando input de escaneo
@@ -24,11 +21,28 @@ const RESULTADO_BACKEND = {
 //   pasa     → backend dijo "PASA" (no se inspecciona)
 //   inspect  → backend dijo "REVISAR" → formulario abierto automáticamente
 //   submit   → POST /InspeccionQA/crearInspeccion en vuelo
+//   success  → backend confirmó la inspección; mostramos su veredicto unos segundos
 const F_IDLE     = 'idle';
 const F_SCANNING = 'scanning';
 const F_PASA     = 'pasa';
 const F_INSPECT  = 'inspect';
 const F_SUBMIT   = 'submit';
+const F_SUCCESS  = 'success';
+
+// Tiempo (ms) que se muestra el banner de éxito antes de regresar a idle.
+const SUCCESS_AUTO_DISMISS_MS = 3500;
+
+/**
+ * Vista previa del resultado en función de cuántos defectos lleva marcados
+ * el inspector. La lógica real la corre el backend al guardar; esto es solo
+ * para feedback visual mientras llena el formulario.
+ */
+function previsualizarResultado(count) {
+  if (count === 0) return { resultado: 'APROBADO',  stars: 5, tone: 'flow',      icon: '✓'  };
+  if (count === 1) return { resultado: 'APROBADO',  stars: 4, tone: 'flow',      icon: '✓'  };
+  if (count <= 4) return  { resultado: 'RETRABAJO', stars: 3, tone: 'attention', icon: '🔧' };
+  return                  { resultado: 'RECHAZADO', stars: 1, tone: 'anomaly',   icon: '✕'  };
+}
 
 export function OperatorScreen() {
   const { session } = useAuth();
@@ -73,6 +87,7 @@ export function OperatorScreen() {
   const [otherText, setOtherText]     = useState('');
   const [notes, setNotes]             = useState('');
   const [submitError, setSubmitError] = useState(null);
+  const [submitResponse, setSubmitResponse] = useState(null);
 
   const [counter, setCounter] = useState(1);
 
@@ -86,6 +101,7 @@ export function OperatorScreen() {
     setOtherText('');
     setNotes('');
     setSubmitError(null);
+    setSubmitResponse(null);
   };
 
   const doScan = async (epc) => {
@@ -128,43 +144,89 @@ export function OperatorScreen() {
     reset();
   };
 
+  // ─── WebSocket: escuchar escaneos en tiempo real ───
+  // Usamos un ref para conocer el estado actual sin romper la identidad del
+  // handler (que solo se crea una vez).
+  const flowRef = useRef(flow);
+  flowRef.current = flow;
+
+  const handleSocketScan = useCallback((data) => {
+    const current = flowRef.current;
+    // Si el inspector está en plena captura, enviando, o viendo el éxito de
+    // la inspección anterior, no interrumpimos.
+    if (current === F_INSPECT || current === F_SUBMIT || current === F_SCANNING || current === F_SUCCESS) {
+      console.log('[socket] qa-escaneo ignorado (estado activo):', current);
+      return;
+    }
+    const decision = String(data?.accion || '').toUpperCase();
+    setScanData(data);
+    setScanError(null);
+    setScanInput(data?.epc || '');
+
+    if (decision === 'PASA') {
+      setFlow(F_PASA);
+      // El banner verde se desvanece solo después de unos segundos.
+      setTimeout(() => {
+        setFlow((f) => (f === F_PASA ? F_IDLE : f));
+        setScanData((prev) => (prev?.epc === data?.epc ? null : prev));
+        setScanInput('');
+        setCounter((c) => c + 1);
+      }, PASA_AUTO_DISMISS_MS);
+    } else if (decision === 'REVISAR') {
+      setFlow(F_INSPECT);
+    } else {
+      console.warn('[socket] decisión desconocida:', data);
+      setScanError(`Respuesta inesperada del socket: ${JSON.stringify(data)}`);
+      setFlow(F_IDLE);
+    }
+  }, []);
+
+  const { connected: socketConnected } = useScanSocket(handleSocketScan);
+
   const toggleDefect = (cat) => {
     setDefectTypes((d) => (
       d.includes(cat) ? d.filter((t) => t !== cat) : [...d, cat]
     ));
   };
 
-  const handleSubmit = async (decision) => {
+  const handleSubmit = async () => {
     setFlow(F_SUBMIT);
     setSubmitError(null);
 
-    const isApproved = decision === 'approve';
-    let defectos    = [];
-    let observacion = null;
-
-    if (!isApproved) {
-      defectos = defectTypes.map((t) =>
-        t === 'Otro (especificar)' && otherText ? otherText : t
-      );
-      // El texto libre de "Otro" también va en observacion para trazabilidad en backend.
-      observacion = notes.trim() || (otherText.trim() ? otherText.trim() : null);
-    }
+    // Mandamos solo los defectos marcados. "Otro" se sustituye por el texto
+    // libre cuando viene. El backend calcula resultado, score y stars.
+    const defectos = defectTypes.map((t) =>
+      t === 'Otro (especificar)' && otherText ? otherText : t
+    );
+    const observacion = notes.trim() || (otherText.trim() ? otherText.trim() : null);
 
     const payload = {
       tag_epc:      scanData?.epc,
       proveedor_id: scanData?.proveedor_id ?? null,
       operador_id:  session?.user?.sub,
-      resultado:    RESULTADO_BACKEND[decision],
       defectos,
       observacion,
       fecha:        new Date().toISOString(),
     };
 
     try {
-      await crearInspeccion(payload);
-      loadPendientes(); // el backend ya decrementó el contador
-      setCounter((c) => c + 1);
-      reset();
+      const response = await crearInspeccion(payload);
+      console.log('[inspeccion] respuesta del backend:', response);
+      setSubmitResponse(response);
+      setFlow(F_SUCCESS);
+      loadPendientes(); // refresca el contador de pendientes con el nuevo estado
+
+      // Volvemos solitos a idle tras unos segundos.
+      setTimeout(() => {
+        setFlow((f) => (f === F_SUCCESS ? F_IDLE : f));
+        setSubmitResponse(null);
+        setScanData(null);
+        setScanInput('');
+        setDefectTypes([]);
+        setOtherText('');
+        setNotes('');
+        setCounter((c) => c + 1);
+      }, SUCCESS_AUTO_DISMISS_MS);
     } catch (err) {
       console.error('Error al registrar inspección:', err);
       setSubmitError(err.message);
@@ -175,6 +237,7 @@ export function OperatorScreen() {
   // ─── Render ────────────────────────────────────────
   return (
     <div className="px-8 py-5 max-w-[1400px] mx-auto">
+      <SocketStatus connected={socketConnected} />
       <OperatorBar counterLabel="Escaneo" counterValue={counter} />
 
       {(flow === F_IDLE || flow === F_SCANNING) && (
@@ -212,6 +275,10 @@ export function OperatorScreen() {
           submitting={flow === F_SUBMIT}
           error={submitError}
         />
+      )}
+
+      {flow === F_SUCCESS && (
+        <SuccessResult response={submitResponse} scanData={scanData} onContinue={handleScanNext} />
       )}
     </div>
   );
@@ -533,8 +600,7 @@ function RevisarFlow({
   data, availableDefects, defectTypes, onToggleDefect, otherText, setOtherText, notes, setNotes,
   onSubmit, onCancel, submitting, error,
 }) {
-  const hasOther   = defectTypes.includes('Otro (especificar)');
-  const hasDefects = defectTypes.length > 0;
+  const hasOther = defectTypes.includes('Otro (especificar)');
 
   return (
     <div className="animate-[fadeIn_.3s_ease]">
@@ -590,32 +656,51 @@ function RevisarFlow({
           </button>
         </div>
 
-        {/* Defect types */}
+        {/* Defect checkboxes */}
         <div className="mb-4">
           <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400 mb-2">
-            Tipos de defecto (déjalo vacío si la inspección sale OK)
+            Marca los defectos encontrados (déjalo vacío si la inspección sale OK)
           </div>
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {availableDefects.map((d) => {
               const selected = defectTypes.includes(d.cat);
               return (
-                <button
+                <label
                   key={d.cat}
-                  type="button"
-                  onClick={() => onToggleDefect(d.cat)}
-                  disabled={submitting}
                   className={
-                    'flex flex-col items-center gap-1.5 px-2.5 py-3 rounded-card border text-xs font-medium transition-colors ' +
-                    'disabled:opacity-50 ' +
+                    'flex items-center gap-2.5 px-3 py-2.5 rounded-card border cursor-pointer select-none transition-colors ' +
+                    (submitting ? 'opacity-50 cursor-not-allowed ' : '') +
                     (selected
-                      ? 'bg-anomaly-bg border-anomaly-ring text-anomaly dark:bg-anomaly/20 dark:border-anomaly-ring dark:text-anomaly-ring'
-                      : 'bg-ink-50 border-ink-100 text-ink-500 hover:border-ink-200 ' +
-                        'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-300 dark:hover:border-ink-400')
+                      ? 'bg-anomaly-bg border-anomaly-ring dark:bg-anomaly/20 dark:border-anomaly-ring'
+                      : 'bg-ink-50 border-ink-100 hover:border-ink-200 ' +
+                        'dark:bg-ink-600 dark:border-ink-500 dark:hover:border-ink-400')
                   }
                 >
-                  <span className="text-xl">{d.icon}</span>
-                  <span className="text-center leading-tight">{d.cat}</span>
-                </button>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={() => onToggleDefect(d.cat)}
+                    disabled={submitting}
+                    className="sr-only"
+                  />
+                  <span className={
+                    'w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ' +
+                    (selected
+                      ? 'bg-anomaly-ring border-anomaly-ring text-white'
+                      : 'bg-white border-ink-300 dark:bg-ink-700 dark:border-ink-400')
+                  }>
+                    {selected && <span className="text-[11px] font-bold leading-none">✓</span>}
+                  </span>
+                  <span className="text-base shrink-0">{d.icon}</span>
+                  <span className={
+                    'text-[13px] leading-tight ' +
+                    (selected
+                      ? 'text-anomaly font-semibold dark:text-anomaly-ring'
+                      : 'text-ink-700 dark:text-ink-100')
+                  }>
+                    {d.cat}
+                  </span>
+                </label>
               );
             })}
           </div>
@@ -671,71 +756,197 @@ function RevisarFlow({
           </div>
         )}
 
-        {/* Decisión final */}
-        <div className="grid grid-cols-3 gap-3">
-          <DecisionButton
-            icon="✓"
-            label="Aprobar"
-            hint="Sin defectos"
-            tone="flow"
-            onClick={() => onSubmit('approve')}
-            disabled={submitting}
-          />
-          <DecisionButton
-            icon="🔧"
-            label="Retrabajo"
-            hint="Requiere ajuste"
-            tone="attention"
-            onClick={() => onSubmit('retrabajo')}
-            disabled={submitting || !hasDefects}
-          />
-          <DecisionButton
-            icon="✕"
-            label="Rechazar"
-            hint="No entra al flujo"
-            tone="anomaly"
-            onClick={() => onSubmit('reject')}
-            disabled={submitting || !hasDefects}
-          />
-        </div>
+        {/* Vista previa del resultado + confirmar */}
+        <ResultPreview count={defectTypes.length} />
 
-        {submitting && (
-          <div className="mt-4 text-center text-xs text-ink-400 animate-pulse">
-            Registrando inspección…
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={submitting}
+          className={
+            'w-full mt-3 px-6 py-3.5 rounded-card font-display text-sm font-semibold text-white ' +
+            'bg-attention border border-attention-ring hover:opacity-90 transition-opacity ' +
+            'disabled:opacity-50 disabled:cursor-not-allowed'
+          }
+        >
+          {submitting ? 'Registrando inspección…' : 'Confirmar inspección →'}
+        </button>
       </div>
     </div>
   );
 }
 
-function DecisionButton({ icon, label, hint, tone, onClick, disabled }) {
+// ════════════════════════════════════════════════════════════════════
+// RESULT PREVIEW — feedback en vivo del veredicto estimado
+// ════════════════════════════════════════════════════════════════════
+
+function ResultPreview({ count }) {
+  const preview = previsualizarResultado(count);
   const toneCls = {
-    flow:      'border-flow-ring/40 hover:bg-flow-bg dark:border-flow-ring/40 dark:hover:bg-flow/20',
-    attention: 'border-attention-ring/40 hover:bg-attention-bg dark:border-attention-ring/40 dark:hover:bg-attention/20',
-    anomaly:   'border-anomaly-ring/40 hover:bg-anomaly-bg dark:border-anomaly-ring/40 dark:hover:bg-anomaly/20',
+    flow:      'bg-flow-bg border-flow-ring/40 text-flow dark:bg-flow/15 dark:border-flow-ring/40 dark:text-flow-ring',
+    attention: 'bg-attention-bg border-attention-ring/40 text-attention dark:bg-attention/15 dark:border-attention-ring/40 dark:text-attention-ring',
+    anomaly:   'bg-anomaly-bg border-anomaly-ring/40 text-anomaly dark:bg-anomaly/15 dark:border-anomaly-ring/40 dark:text-anomaly-ring',
+  }[preview.tone];
+
+  return (
+    <div className={'p-4 rounded-card border-2 ' + toneCls}>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[10px] font-display font-semibold uppercase tracking-industrial opacity-80">
+            Resultado estimado
+          </div>
+          <div className="font-display text-2xl font-bold mt-0.5">
+            {preview.icon} {preview.resultado}
+          </div>
+          <div className="text-[11px] opacity-70 mt-0.5">
+            {count} {count === 1 ? 'defecto marcado' : 'defectos marcados'}
+          </div>
+        </div>
+        <div className="text-right">
+          <div className="font-mono text-3xl font-bold leading-none">
+            {preview.stars}<span className="text-base opacity-60">/5</span>
+          </div>
+          <div className="text-[11px] uppercase tracking-industrial opacity-70 mt-1">
+            estrellas
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SUCCESS RESULT — confirmación del backend tras registrar la inspección
+// ════════════════════════════════════════════════════════════════════
+
+function SuccessResult({ response, scanData, onContinue }) {
+  const resultado = response?.resultado || '—';
+  const tone =
+    resultado === 'APROBADO'  ? 'flow' :
+    resultado === 'RETRABAJO' ? 'attention' :
+    resultado === 'RECHAZADO' ? 'anomaly' : 'flow';
+
+  const toneBox = {
+    flow:      'bg-flow-bg border-flow-ring dark:bg-flow/15 dark:border-flow-ring',
+    attention: 'bg-attention-bg border-attention-ring dark:bg-attention/15 dark:border-attention-ring',
+    anomaly:   'bg-anomaly-bg border-anomaly-ring dark:bg-anomaly/15 dark:border-anomaly-ring',
   }[tone];
-  const textCls = {
+  const toneText = {
     flow:      'text-flow dark:text-flow-ring',
     attention: 'text-attention dark:text-attention-ring',
     anomaly:   'text-anomaly dark:text-anomaly-ring',
   }[tone];
+  const icon = resultado === 'APROBADO' ? '✓' : resultado === 'RETRABAJO' ? '🔧' : resultado === 'RECHAZADO' ? '✕' : '✓';
+
+  const starsBefore = response?.stars_anterior;
+  const starsAfter  = response?.stars_nuevo;
+  const starsDelta  = starsBefore != null && starsAfter != null ? starsAfter - starsBefore : null;
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={
-        'p-5 text-center rounded-card border-2 transition-colors ' +
-        'bg-white dark:bg-ink-600 ' +
-        toneCls + ' ' +
-        'disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-ink-600'
-      }
-    >
-      <div className="text-3xl mb-1">{icon}</div>
-      <div className={'font-display text-sm font-semibold ' + textCls}>{label}</div>
-      <div className="text-[10px] text-ink-400 mt-0.5">{hint}</div>
-    </button>
+    <div className="animate-[fadeIn_.3s_ease]">
+      {/* Banner grande con veredicto */}
+      <div className={'p-10 text-center rounded-card border-4 shadow-card mb-4 ' + toneBox}>
+        <div className="text-7xl mb-1 leading-none">{icon}</div>
+        <div className={'font-display text-6xl font-bold tracking-tight leading-none mb-2 ' + toneText}>
+          {resultado}
+        </div>
+        <div className="text-sm font-display font-medium text-ink-700 dark:text-ink-100">
+          Inspección registrada · {response?.defectos_encontrados ?? 0} defecto(s)
+        </div>
+        {response?.score != null && (
+          <div className="text-xs text-ink-500 dark:text-ink-300 mt-2">
+            Score: <span className="font-mono font-semibold">{response.score}</span>
+            {response?.inspeccion_id != null && (
+              <> · ID #{response.inspeccion_id}</>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Detalle del proveedor con delta de stars */}
+      {starsBefore != null && starsAfter != null && (
+        <div className="bg-white border border-ink-100 rounded-card p-4 shadow-card mb-4 dark:bg-ink-700 dark:border-ink-600">
+          <div className="text-[10px] font-display font-semibold uppercase tracking-industrial text-ink-400 mb-2">
+            Calificación del proveedor — {scanData?.proveedor_nombre || '—'}
+          </div>
+          <div className="flex items-center justify-around gap-4">
+            <div className="text-center">
+              <div className="text-[10px] uppercase tracking-industrial text-ink-400 mb-1">Antes</div>
+              <div className="font-mono text-3xl font-semibold text-ink-500 dark:text-ink-300">
+                {Number(starsBefore).toFixed(1)}
+              </div>
+            </div>
+            <div className="text-3xl text-ink-300">→</div>
+            <div className="text-center">
+              <div className="text-[10px] uppercase tracking-industrial text-ink-400 mb-1">Después</div>
+              <div className={
+                'font-mono text-3xl font-bold ' +
+                (starsDelta > 0
+                  ? 'text-flow dark:text-flow-ring'
+                  : starsDelta < 0
+                  ? 'text-anomaly dark:text-anomaly-ring'
+                  : 'text-ink-700 dark:text-ink-100')
+              }>
+                {Number(starsAfter).toFixed(1)}
+              </div>
+              {starsDelta != null && starsDelta !== 0 && (
+                <div className={
+                  'text-[11px] font-mono mt-0.5 ' +
+                  (starsDelta > 0 ? 'text-flow dark:text-flow-ring' : 'text-anomaly dark:text-anomaly-ring')
+                }>
+                  {starsDelta > 0 ? '+' : ''}{starsDelta.toFixed(2)}
+                </div>
+              )}
+            </div>
+            {response?.level_nuevo && (
+              <>
+                <div className="text-3xl text-ink-300">·</div>
+                <div className="text-center">
+                  <div className="text-[10px] uppercase tracking-industrial text-ink-400 mb-1">Nivel</div>
+                  <NivelBadge level={response.level_nuevo} color={response.color_nuevo || 'bn'} />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={onContinue}
+        className={
+          'w-full px-8 py-3.5 rounded-card font-display text-sm font-semibold text-white ' +
+          'bg-rfid border border-rfid hover:bg-blue-700 transition-colors ' +
+          'dark:hover:bg-blue-600'
+        }
+      >
+        Escanear siguiente prepack →
+      </button>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SOCKET STATUS — pill indicando si estamos escuchando eventos en vivo
+// ════════════════════════════════════════════════════════════════════
+
+function SocketStatus({ connected }) {
+  return (
+    <div className="flex justify-end mb-2">
+      <span className={
+        'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border ' +
+        'font-display text-[10px] font-semibold uppercase tracking-industrial ' +
+        (connected
+          ? 'bg-flow-bg text-flow border-flow-ring/40 dark:bg-flow/20 dark:text-flow-ring dark:border-flow-ring/40'
+          : 'bg-ink-50 text-ink-400 border-ink-200 dark:bg-ink-600 dark:text-ink-300 dark:border-ink-500')
+      }>
+        <span className={
+          'w-1.5 h-1.5 rounded-full ' +
+          (connected
+            ? 'bg-flow-ring shadow-[0_0_6px_rgba(34,197,94,0.6)] animate-pulse'
+            : 'bg-ink-400')
+        } />
+        {connected ? 'Lectura en vivo' : 'Sin conexión en vivo'}
+      </span>
+    </div>
   );
 }
