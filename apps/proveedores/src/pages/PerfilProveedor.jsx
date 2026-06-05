@@ -1,12 +1,10 @@
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import { NivelBadge } from '../components/NivelBadge.jsx';
 import { Stars } from '../components/Stars.jsx';
 import { Sparkline } from '../components/Sparkline.jsx';
-import {
-  SUPPLIERS_INITIAL,
-  SUPPLIER_PROFILES,
-  accionSistema,
-} from '../data/demoData.js';
+import { accionSistema } from '../data/demoData.js';
+import { fetchPerfilProveedor, fetchProveedores } from '../api/proveedores.js';
 
 /**
  * Supplier detail page. The supplier ID comes from the URL:
@@ -58,23 +56,46 @@ export function PerfilProveedor() {
   const navigate = useNavigate();
 
   const id = parseInt(proveedorId, 10);
-  const supplier = SUPPLIERS_INITIAL.find((s) => s.id === id);
 
-  // Unknown ID → bounce to the list. Could also render a 404 page; the
-  // list is friendlier for now.
-  if (!supplier) {
-    return <Navigate to="/proveedores/resumen" replace />;
+  const [profile, setProfile]           = useState(null);
+  const [supplierList, setSupplierList] = useState([]);
+  const [loading, setLoading]           = useState(true);
+  const [notFound, setNotFound]         = useState(false);
+
+  useEffect(() => {
+    if (isNaN(id)) { setNotFound(true); setLoading(false); return; }
+    setLoading(true);
+    setNotFound(false);
+    Promise.all([fetchPerfilProveedor(id), fetchProveedores()])
+      .then(([perfil, lista]) => {
+        setProfile(perfil);
+        setSupplierList(lista);
+      })
+      .catch((err) => {
+        console.error('Error al cargar perfil del proveedor:', err);
+        setNotFound(true);
+      })
+      .finally(() => setLoading(false));
+  }, [id]);
+
+  if (!loading && notFound) return <Navigate to="/proveedores/resumen" replace />;
+
+  if (loading || !profile) {
+    return (
+      <div className="px-8 py-5 max-w-[1400px] mx-auto">
+        <div className="text-center py-16 text-xs text-ink-400">Cargando perfil…</div>
+      </div>
+    );
   }
 
-  const profile = SUPPLIER_PROFILES[id] || SUPPLIER_PROFILES[1];
-  const acc = accionSistema(supplier.stars);
+  const acc = accionSistema(profile.stars);
   const actionStyle = ACTION_BOX[acc.cls] || ACTION_BOX.nuevo;
 
   const kpis = [
-    { label: 'Entregas YTD',       value: profile.deliveries,         color: 'default' },
-    { label: 'Tasa de aprobación', value: `${profile.approval}%`,     color: 'green'   },
-    { label: 'Defectos detectados', value: profile.defects,           color: 'red'     },
-    { label: 'Lead time promedio', value: `${profile.leadtime} días`, color: 'blue'    },
+    { label: 'Entregas YTD',        value: profile.deliveries,          color: 'default' },
+    { label: 'Tasa de aprobación',  value: `${profile.approval}%`,      color: 'green'   },
+    { label: 'Defectos detectados', value: profile.defects,             color: 'red'     },
+    { label: 'Lead time promedio',  value: `${profile.leadtime} días`,  color: 'blue'    },
   ];
 
   const commercialFields = [
@@ -103,8 +124,8 @@ export function PerfilProveedor() {
             'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-100'
           }
         >
-          {SUPPLIERS_INITIAL.map((x) => (
-            <option key={x.id} value={x.id}>{x.name}</option>
+          {supplierList.map((x) => (
+            <option key={x.id} value={x.id}>{x.nombre}</option>
           ))}
         </select>
       </div>
@@ -124,19 +145,19 @@ export function PerfilProveedor() {
         </div>
         <div className="flex-1 min-w-0">
           <div className="font-display text-[26px] font-semibold text-ink-700 dark:text-ink-100 mb-1">
-            {supplier.name}
+            {profile.nombre}
           </div>
           <div className="font-mono text-[13px] text-ink-400 mb-2 truncate">
-            {profile.rfc} · {supplier.origin}
+            {profile.rfc} · {profile.origin}
           </div>
-          <NivelBadge level={supplier.level} color={supplier.color} />
+          <NivelBadge level={profile.level} color={profile.color} />
         </div>
         <div className="shrink-0 text-right">
           <div className="font-mono text-[36px] font-semibold text-amber-500 dark:text-amber-400 leading-none">
-            {supplier.stars.toFixed(1)}
+            {Number(profile.stars).toFixed(1)}
           </div>
           <div className="mt-1.5 flex justify-end">
-            <Stars rating={supplier.stars} size={14} />
+            <Stars rating={profile.stars} size={14} />
           </div>
         </div>
       </div>

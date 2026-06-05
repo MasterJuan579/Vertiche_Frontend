@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { NivelBadge } from '../components/NivelBadge.jsx';
 import { Stars } from '../components/Stars.jsx';
-import { SUPPLIERS_INITIAL } from '../data/demoData.js';
+import { fetchProveedores, fetchTurnoResumen } from '../api/proveedores.js';
 
 /**
  * Shift summary for the QA inspector. Shows daily KPIs and a list of all
@@ -23,10 +23,20 @@ const KPI_COLOR_CLS = {
 
 export function ResumenTurno() {
   const navigate = useNavigate();
-  // Local state for demo — would come from backend or shared store.
-  const [stats] = useState({ totalSO: 0, inspected: 0, rejected: 0 });
+  const [stats, setStats]         = useState({ totalSO: 0, inspected: 0, rejected: 0 });
+  const [suppliers, setSuppliers] = useState([]);
+  const [loading, setLoading]     = useState(true);
 
-  const suppliers = SUPPLIERS_INITIAL;
+  useEffect(() => {
+    Promise.all([fetchTurnoResumen(), fetchProveedores()])
+      .then(([turno, lista]) => {
+        setStats(turno);
+        setSuppliers(lista);
+      })
+      .catch((err) => console.error('Error al cargar resumen de turno:', err))
+      .finally(() => setLoading(false));
+  }, []);
+
   const active = suppliers.filter((s) => s.stars > 0);
   const avgStars = active.length
     ? (active.reduce((a, s) => a + s.stars, 0) / active.length).toFixed(1)
@@ -65,11 +75,17 @@ export function ResumenTurno() {
           Dashboard de reputación dinámica
         </div>
 
-        {suppliers.map((s, idx) => {
+        {loading && (
+          <div className="text-center py-6 text-xs text-ink-400">Cargando proveedores…</div>
+        )}
+        {!loading && suppliers.length === 0 && (
+          <div className="text-center py-6 text-xs text-ink-400">Sin proveedores registrados.</div>
+        )}
+        {!loading && suppliers.map((s, idx) => {
           const barColorCls =
             s.stars >= 4.5
               ? 'bg-flow-ring'
-              : s.stars >= 2.5
+              : s.stars >= 3.5
               ? 'bg-attention-ring'
               : s.stars > 0
               ? 'bg-anomaly-ring'
@@ -90,7 +106,7 @@ export function ResumenTurno() {
               {/* Name + origin */}
               <div className="flex-1 min-w-0 px-1">
                 <div className="text-[13px] font-medium text-ink-700 dark:text-ink-100 mb-0.5">
-                  {s.name}
+                  {s.nombre}
                 </div>
                 <div className="text-[11px] text-ink-400">{s.origin}</div>
               </div>
