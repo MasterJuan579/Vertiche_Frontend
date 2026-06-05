@@ -51,12 +51,15 @@ export function useScanSocket(onScan) {
 
     // ── Lectura RFID en bruto ─────────────────────────────────────
     socket.on('lectura', async (data) => {
-      const etapa = String(data?.lectura?.etapa || '').trim().toUpperCase();
+      // El backend emite el payload PLANO (emit('lectura', lecturaPayload)),
+      // con etapa/epc en la raíz. Aceptamos también la forma anidada
+      // (data.lectura.*) por si el contrato cambia.
+      const etapa = String(data?.etapa ?? data?.lectura?.etapa ?? '').trim().toUpperCase();
       if (etapa !== 'QA') {
         // Lecturas de otras etapas (CEDIS, bahías, etc.) no nos competen.
         return;
       }
-      const epc = data?.lectura?.epc;
+      const epc = data?.epc ?? data?.lectura?.epc;
       if (!epc) {
         console.warn('[socket] lectura QA sin EPC:', data);
         return;
