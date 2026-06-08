@@ -17,8 +17,8 @@ function authHeader() {
   try {
     const raw = sessionStorage.getItem('vertiche.auth');
     if (!raw) return {};
-    const { token } = JSON.parse(raw);
-    return token ? { Authorization: `Bearer ${token}` } : {};
+    const { idToken } = JSON.parse(raw);
+    return idToken ? { Authorization: `Bearer ${idToken}` } : {};
   } catch {
     return {};
   }
