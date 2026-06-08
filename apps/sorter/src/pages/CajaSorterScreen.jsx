@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from 'react';
 import {
   BAY_COLORS,
   DEMO_BAY_ID,
@@ -11,61 +10,10 @@ function fmtTime(ts) {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-export function CajaSorterScreen() {
-  const [current, setCurrent] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [liveStatus, setLiveStatus] = useState('connecting');
-
-  const processScan = useCallback((prepack) => {
-    if (!prepack) return;
-    const scan = {
-      ...prepack,
-      id: prepack.scanId || `${prepack.epc}-${Date.now()}`,
-      scannedAt: Date.now(),
-    };
-    setCurrent(scan);
-    setHistory((prev) => [scan, ...prev].slice(0, 18));
-  }, []);
-
-  useEffect(() => {
-    let socket;
-    let cancelled = false;
-    const API_URL = import.meta.env.VITE_API_URL || '';
-
-    if (!API_URL) {
-      setLiveStatus('demo');
-      return undefined;
-    }
-
-    (async () => {
-      try {
-        const { io } = await import('socket.io-client');
-        if (cancelled) return;
-
-        socket = io(API_URL, {
-          transports: ['websocket', 'polling'],
-          reconnectionDelay: 800,
-          reconnectionDelayMax: 2500,
-        });
-
-        socket.on('connect', () => setLiveStatus('live'));
-        socket.on('disconnect', () => setLiveStatus('connecting'));
-        socket.on('connect_error', () => setLiveStatus('connecting'));
-
-        socket.on('sorter-caja-scan', (payload) => {
-          const prepack = normalizeCajaScan(payload);
-          if (prepack) processScan(prepack);
-        });
-      } catch {
-        if (!cancelled) setLiveStatus('demo');
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      socket?.disconnect();
-    };
-  }, [processScan]);
+export function CajaSorterScreen({ realtime }) {
+  const current = realtime.caja.current;
+  const history = realtime.caja.history;
+  const liveStatus = realtime.liveStatus;
 
   const bayColor = current
     ? BAY_COLORS[current.bahiaActual] || '#6b7280'
@@ -80,7 +28,7 @@ export function CajaSorterScreen() {
           </div>
           <div className="font-mono text-[10px] uppercase tracking-industrial text-ink-400 truncate">
             {liveStatus === 'live'
-              ? 'Lecturas EMPAQUETADO en tiempo real'
+              ? 'Lecturas del arco en tiempo real'
               : `Demo fija: el prepack ya cayo en Bahia ${DEMO_BAY_ID}; este arco decide la caja`}
           </div>
         </div>
@@ -155,59 +103,6 @@ export function CajaSorterScreen() {
       </footer>
     </div>
   );
-}
-
-function normalizeCajaScan(payload) {
-  if (!payload) return null;
-
-  const tag = payload.tag || {};
-  const tienda = payload.tienda || tag.tienda || null;
-  const epc = payload.epc || tag.epc;
-  if (!epc) return null;
-
-  const correctBay = parseBayNumber(
-    payload.bahiaActual ||
-      payload.bahia ||
-      tag.correctBay ||
-      tienda?.bahia_asignada
-  );
-  const cajaDestino = parseCajaNumber(payload.cajaDestino || payload.caja_id);
-
-  return {
-    epc,
-    scanId: payload.lectura_id || payload.id || `${epc}-${payload.timestamp || Date.now()}`,
-    orden_id: payload.orden_id || tag.orden_id || tag.pedido_id || '---',
-    producto: payload.producto || tag.producto || tag.sku || 'Prepack sin detalle',
-    tienda,
-    correctBay: correctBay || 0,
-    bahiaActual: correctBay || 0,
-    cajaDestino: cajaDestino || 1,
-    color: tag.color || '—',
-    talla: tag.talla || '—',
-    total_prendas: Number(tag.cantidad_piezas) || 1,
-    qa_fallido: Boolean(tag.qa_fallido),
-    tipo_flujo: tag.tipo_flujo || 'CROSS_DOCK',
-  };
-}
-
-function parseBayNumber(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string') return null;
-  const match = value.match(/\d+/);
-  return match ? Number(match[0]) : null;
-}
-
-function parseCajaNumber(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string') return null;
-  const cajaMatch = value.match(/CAJA-(\d+)/i);
-  if (cajaMatch) return Number(cajaMatch[1]);
-  const compactMatch = value.match(/\bC(\d+)\b/i);
-  if (compactMatch) return Number(compactMatch[1]);
-  const numberMatch = value.match(/\b(\d+)\b/);
-  if (!numberMatch) return null;
-  const n = Number(numberMatch[1]);
-  return Number.isFinite(n) ? n : null;
 }
 
 function Metric({ icon, colorCls, children }) {
