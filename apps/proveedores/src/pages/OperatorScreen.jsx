@@ -4,35 +4,41 @@ import { NivelBadge } from '../components/NivelBadge.jsx';
 import { Stars } from '../components/Stars.jsx';
 import {
   crearInspeccion,
-  escanearPrepack,
   fetchPendientes,
 } from '../api/proveedores.js';
-import { DEFECT_TYPES, MOCK_EPCS } from '../data/demoData.js';
+import { DEFECT_TYPES } from '../data/demoData.js';
 import { useScanSocket } from '../lib/useScanSocket.js';
 
 // Tiempo (ms) que se muestra el banner "NO SE ESCANEA" antes de regresar a idle.
 const PASA_AUTO_DISMISS_MS = 3000;
 
+// Tiempo (ms) que se muestra el banner "BLOQUEADO" (proveedor con rechazo total).
+// Más largo que PASA porque el mensaje requiere lectura del operador.
+const BLOCKED_AUTO_DISMISS_MS = 4500;
+
 // Máximo de escaneos que mantenemos en el historial visible.
-const MAX_HISTORY = 20;
+// Las entradas NUNCA se eliminan por su propio estado (inspeccionado, pasa,
+// bloqueado) — solo se "rotan" las más viejas cuando llegamos a este cap.
+// Lo dejamos amplio para que un turno completo quepa sin perder nada.
+const MAX_HISTORY = 500;
 
 // ID del operador a usar en el payload de inspección.
 // Hardcodeado mientras no haya Cognito integrado. El backend espera UUID.
 const OPERADOR_ID_HARDCODED = 'a1b2c3d4-2222-4444-aaaa-000000000002';
 
 // Máquina de estados:
-//   idle     → mostrando input de escaneo
-//   scanning → POST /PlanQA/escanear en vuelo
-//   pasa     → backend dijo "PASA" (no se inspecciona)
-//   inspect  → backend dijo "REVISAR" → formulario abierto automáticamente
-//   submit   → POST /InspeccionQA/crearInspeccion en vuelo
-//   success  → backend confirmó la inspección; mostramos su veredicto unos segundos
-const F_IDLE     = 'idle';
-const F_SCANNING = 'scanning';
-const F_PASA     = 'pasa';
-const F_INSPECT  = 'inspect';
-const F_SUBMIT   = 'submit';
-const F_SUCCESS  = 'success';
+//   idle    → a la espera de una lectura RFID (pantalla pasiva)
+//   pasa    → backend dijo "PASA" (no se inspecciona)
+//   blocked → backend dijo "RECHAZADO_TOTAL" (proveedor bloqueado hoy)
+//   inspect → backend dijo "REVISAR" → formulario abierto automáticamente
+//   submit  → POST /InspeccionQA/crearInspeccion en vuelo
+//   success → backend confirmó la inspección; mostramos su veredicto unos segundos
+const F_IDLE    = 'idle';
+const F_PASA    = 'pasa';
+const F_BLOCKED = 'blocked';
+const F_INSPECT = 'inspect';
+const F_SUBMIT  = 'submit';
+const F_SUCCESS = 'success';
 
 // Tiempo (ms) que se muestra el banner de éxito antes de regresar a idle.
 const SUCCESS_AUTO_DISMISS_MS = 3500;
@@ -85,15 +91,18 @@ export function OperatorScreen() {
   //           'completed' → ya inspeccionado, o un PASA (informativo)
   const [scanHistory, setScanHistory] = useState([]);
 
-  const buildHistoryEntry = (data, source) => ({
-    id:        Date.now() + Math.random(),
-    timestamp: new Date(),
-    source,                                 // 'rfid' | 'manual'
-    status:    String(data?.accion || '').toUpperCase() === 'PASA'
-                 ? 'completed'
-                 : 'pending',
-    data,                                   // shape de /PlanQA/escanear
-  });
+  const buildHistoryEntry = (data, source) => {
+    const accion = String(data?.accion || '').toUpperCase();
+    // Solo REVISAR queda en estado 'pending' (requiere inspección manual).
+    // PASA y RECHAZADO_TOTAL son automáticos → 'completed'.
+    return {
+      id:        Date.now() + Math.random(),
+      timestamp: new Date(),
+      source,                                 // 'rfid' | 'manual'
+      status:    accion === 'REVISAR' ? 'pending' : 'completed',
+      data,                                   // shape de /PlanQA/escanear
+    };
+  };
 
   // Agrega una entrada al historial evitando duplicados por EPC.
   //
@@ -137,40 +146,6 @@ export function OperatorScreen() {
     setSubmitResponse(null);
   };
 
-  const doScan = async (epc) => {
-    setFlow(F_SCANNING);
-    setScanError(null);
-    try {
-      const data = await escanearPrepack(epc);
-      const decision = String(data?.accion || '').toUpperCase();
-
-      setScanData(data);
-
-      if (decision === 'PASA' || decision === 'REVISAR') {
-        addHistoryEntry(data, 'manual');
-        // Automático: abrimos banner verde o formulario directo según el caso.
-        setFlow(decision === 'PASA' ? F_PASA : F_INSPECT);
-      } else {
-        console.warn('Respuesta inesperada de /PlanQA/escanear:', data);
-        setScanError(`Respuesta inesperada del servidor: ${JSON.stringify(data)}`);
-        setFlow(F_IDLE);
-      }
-    } catch (err) {
-      console.error('Error al escanear:', err);
-      setScanError(err.message);
-      setFlow(F_IDLE);
-    }
-  };
-
-  const handleSimulate = () => {
-    const epc = MOCK_EPCS[(counter - 1) % MOCK_EPCS.length];
-    setScanInput(epc);
-    doScan(epc);
-  };
-  const handleManual = () => {
-    const epc = scanInput.trim();
-    if (epc) doScan(epc);
-  };
   const handleScanNext = () => {
     setCounter((c) => c + 1);
     reset();
@@ -210,9 +185,9 @@ export function OperatorScreen() {
 
     // Solo cambiamos la pantalla activa si estamos esperando un escaneo:
     // - F_IDLE: pantalla limpia, podemos abrir banner/formulario
-    // - F_PASA: ya hay un banner verde; lo reemplazamos con el nuevo evento
+    // - F_PASA / F_BLOCKED: ya hay un banner; lo reemplazamos con el nuevo evento
     // En cualquier otro estado (inspeccionando, enviando, success), solo encolamos.
-    if (current !== F_IDLE && current !== F_PASA) {
+    if (current !== F_IDLE && current !== F_PASA && current !== F_BLOCKED) {
       console.log('[socket] escaneo encolado (estado activo:', current + '):', data?.epc);
       return;
     }
@@ -232,6 +207,16 @@ export function OperatorScreen() {
       }, PASA_AUTO_DISMISS_MS);
     } else if (decision === 'REVISAR') {
       setFlow(F_INSPECT);
+    } else if (decision === 'RECHAZADO_TOTAL') {
+      setFlow(F_BLOCKED);
+      // El banner rojo también se desvanece solo, pero le damos más tiempo
+      // porque el operador necesita leer el motivo del bloqueo.
+      setTimeout(() => {
+        setFlow((f) => (f === F_BLOCKED ? F_IDLE : f));
+        setScanData((prev) => (prev?.epc === data?.epc ? null : prev));
+        setScanInput('');
+        setCounter((c) => c + 1);
+      }, BLOCKED_AUTO_DISMISS_MS);
     } else {
       console.warn('[socket] decisión desconocida:', data);
       setScanError(`Respuesta inesperada del socket: ${JSON.stringify(data)}`);
@@ -315,24 +300,18 @@ export function OperatorScreen() {
       <SocketStatus connected={socketConnected} />
       <OperatorBar counterLabel="Escaneo" counterValue={counter} />
 
-      {(flow === F_IDLE || flow === F_SCANNING) && (
+      {flow === F_IDLE && (
         <PendientesPanel loading={pendientesLoading} pendientes={pendientes} />
       )}
 
-      {flow === F_IDLE && (
-        <ScanCard
-          input={scanInput}
-          setInput={setScanInput}
-          onSimulate={handleSimulate}
-          onManual={handleManual}
-          error={scanError}
-        />
-      )}
-
-      {flow === F_SCANNING && <ScanningCard epc={scanInput} />}
+      {flow === F_IDLE && <ScanCard error={scanError} />}
 
       {flow === F_PASA && (
         <PasaResult data={scanData} onScanNext={handleScanNext} />
+      )}
+
+      {flow === F_BLOCKED && (
+        <BlockedResult data={scanData} onScanNext={handleScanNext} />
       )}
 
       {/* Historial visible siempre excepto en el banner de éxito */}
@@ -340,7 +319,7 @@ export function OperatorScreen() {
         <ScanHistoryPanel
           history={scanHistory}
           onPickPending={handlePickPending}
-          canPick={flow === F_IDLE || flow === F_PASA}
+          canPick={flow === F_IDLE || flow === F_PASA || flow === F_BLOCKED}
         />
       )}
 
@@ -437,7 +416,7 @@ function PendientesPanel({ loading, pendientes }) {
 // SCAN CARD — input + simulate (estado idle)
 // ════════════════════════════════════════════════════════════════════
 
-function ScanCard({ input, setInput, onSimulate, onManual, error }) {
+function ScanCard({ error }) {
   return (
     <div className={
       'p-10 text-center rounded-card border border-ink-100 shadow-card ' +
@@ -446,55 +425,17 @@ function ScanCard({ input, setInput, onSimulate, onManual, error }) {
     }>
       <div className={
         'w-[90px] h-[90px] mx-auto mb-5 rounded-full flex items-center justify-center ' +
-        'bg-blue-50 border-2 border-rfid ' +
+        'bg-blue-50 border-2 border-rfid animate-pulse ' +
         'dark:bg-rfid/20 dark:border-rfid'
       }>
         <span className="text-4xl">📡</span>
       </div>
       <p className="text-base font-display font-medium text-ink-700 dark:text-ink-100 mb-1.5">
-        Escanea un prepack
+        A la espera de un prepack
       </p>
-      <p className="text-xs text-ink-400 mb-5">
-        El sistema decidirá automáticamente si se inspecciona o pasa directo
+      <p className="text-xs text-ink-400">
+        El sistema reaccionará automáticamente cuando el arco RFID detecte una lectura
       </p>
-
-      <div className="max-w-[420px] mx-auto">
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') onManual(); }}
-          placeholder="EPC del prepack…"
-          className={
-            'w-full px-3 py-2.5 mb-2.5 rounded-card text-[13px] text-center outline-none font-mono ' +
-            'bg-ink-50 border border-ink-100 text-ink-700 placeholder:text-ink-400 ' +
-            'focus:border-rfid ' +
-            'dark:bg-ink-600 dark:border-ink-500 dark:text-ink-100'
-          }
-        />
-        <div className="grid grid-cols-2 gap-2.5">
-          <button
-            onClick={onManual}
-            disabled={!input.trim()}
-            className={
-              'px-4 py-3 rounded-card font-display text-sm font-semibold transition-colors ' +
-              'bg-ink-100 text-ink-700 hover:bg-ink-200 disabled:opacity-50 disabled:cursor-not-allowed ' +
-              'dark:bg-ink-600 dark:text-ink-100 dark:hover:bg-ink-500'
-            }
-          >
-            Escanear EPC
-          </button>
-          <button
-            onClick={onSimulate}
-            className={
-              'px-4 py-3 rounded-card font-display text-sm font-semibold text-white ' +
-              'bg-rfid hover:bg-blue-700 transition-colors dark:hover:bg-blue-600'
-            }
-          >
-            Simular lectura
-          </button>
-        </div>
-      </div>
 
       {error && (
         <div className={
@@ -505,31 +446,6 @@ function ScanCard({ input, setInput, onSimulate, onManual, error }) {
           {error}
         </div>
       )}
-    </div>
-  );
-}
-
-// ════════════════════════════════════════════════════════════════════
-// SCANNING CARD — feedback durante el POST
-// ════════════════════════════════════════════════════════════════════
-
-function ScanningCard({ epc }) {
-  return (
-    <div className={
-      'p-10 text-center rounded-card border border-ink-100 shadow-card ' +
-      'bg-white dark:bg-ink-700 dark:border-ink-600'
-    }>
-      <div className={
-        'w-[90px] h-[90px] mx-auto mb-5 rounded-full flex items-center justify-center ' +
-        'bg-blue-50 border-2 border-rfid animate-pulse ' +
-        'dark:bg-rfid/20 dark:border-rfid'
-      }>
-        <span className="text-4xl">📡</span>
-      </div>
-      <p className="text-base font-display font-medium text-ink-700 dark:text-ink-100 mb-1.5">
-        Consultando con el sistema…
-      </p>
-      <p className="font-mono text-xs text-ink-400">{epc}</p>
     </div>
   );
 }
@@ -661,6 +577,58 @@ function PasaResult({ data, onScanNext }) {
       </div>
 
       {/* CTA */}
+      <button
+        onClick={onScanNext}
+        className={
+          'w-full px-8 py-3.5 rounded-card font-display text-sm font-semibold text-white ' +
+          'bg-rfid border border-rfid hover:bg-blue-700 transition-colors ' +
+          'dark:hover:bg-blue-600'
+        }
+      >
+        Escanear siguiente prepack →
+      </button>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// BLOCKED RESULT — "BLOQUEADO" cuando el proveedor ya tuvo rechazo total hoy
+// ════════════════════════════════════════════════════════════════════
+
+function BlockedResult({ data, onScanNext }) {
+  return (
+    <div className="animate-[fadeIn_.3s_ease]">
+      {/* Alerta GRANDE roja */}
+      <div className={
+        'p-10 text-center rounded-card border-4 shadow-card mb-4 ' +
+        'bg-anomaly-bg border-anomaly-ring ' +
+        'dark:bg-anomaly/15 dark:border-anomaly-ring'
+      }>
+        <div className="text-7xl mb-1 leading-none">🚫</div>
+        <div className="font-display text-6xl font-bold tracking-tight leading-none mb-2 text-anomaly dark:text-anomaly-ring">
+          BLOQUEADO
+        </div>
+        <div className="text-sm font-display font-semibold text-ink-700 dark:text-ink-100 mb-1">
+          Proveedor bloqueado por rechazo total del día
+        </div>
+        {data?.proveedor_nombre && (
+          <div className="text-sm font-display font-medium text-anomaly dark:text-anomaly-ring mt-1">
+            {data.proveedor_nombre}
+          </div>
+        )}
+        {data?.mensaje && (
+          <div className="text-xs text-ink-500 dark:text-ink-300 mt-3 max-w-md mx-auto leading-relaxed">
+            {data.mensaje}
+          </div>
+        )}
+      </div>
+
+      {/* Info en dos columnas */}
+      <div className="grid grid-cols-2 gap-3.5 mb-4">
+        <PrepackInfoCard data={data} />
+        <SupplierInfoCard data={data} />
+      </div>
+
       <button
         onClick={onScanNext}
         className={
@@ -1056,10 +1024,12 @@ function ScanHistoryPanel({ history, onPickPending, canPick }) {
         else acc.inspeccionados += 1;
       } else if (accion === 'PASA') {
         acc.pasa += 1;
+      } else if (accion === 'RECHAZADO_TOTAL') {
+        acc.bloqueados += 1;
       }
       return acc;
     },
-    { pendientes: 0, inspeccionados: 0, pasa: 0 }
+    { pendientes: 0, inspeccionados: 0, pasa: 0, bloqueados: 0 }
   );
 
   return (
@@ -1081,6 +1051,7 @@ function ScanHistoryPanel({ history, onPickPending, canPick }) {
           <HistoryStat label="Pendientes"     value={totals.pendientes}     tone="attention" pulse={totals.pendientes > 0} />
           <HistoryStat label="Inspeccionados" value={totals.inspeccionados} tone="ink" />
           <HistoryStat label="Pasaron"        value={totals.pasa}           tone="flow" />
+          <HistoryStat label="Bloqueados"     value={totals.bloqueados}     tone="anomaly" />
           <HistoryStat label="Total"          value={history.length}        tone="ink" />
         </div>
       </div>
@@ -1111,6 +1082,7 @@ function HistoryStat({ label, value, tone, pulse }) {
   const cls = {
     flow:      'text-flow dark:text-flow-ring',
     attention: 'text-attention dark:text-attention-ring',
+    anomaly:   'text-anomaly dark:text-anomaly-ring',
     ink:       'text-ink-700 dark:text-ink-100',
   }[tone];
   return (
@@ -1131,8 +1103,9 @@ function HistoryStat({ label, value, tone, pulse }) {
 function HistoryRow({ entry, isLatest, canPick, onPick }) {
   const data = entry.data || {};
   const accion = String(data.accion || '').toUpperCase();
-  const isRevisar = accion === 'REVISAR';
-  const isPending = entry.status === 'pending';
+  const isRevisar  = accion === 'REVISAR';
+  const isBlocked  = accion === 'RECHAZADO_TOTAL';
+  const isPending  = entry.status === 'pending';
   const isClickable = isRevisar && isPending && canPick;
 
   // Pill del veredicto
@@ -1146,6 +1119,9 @@ function HistoryRow({ entry, isLatest, canPick, onPick }) {
       verdictLabel = '🔍 INSPECCIONADO';
       verdictCls = 'bg-ink-100 text-ink-500 border-ink-200 dark:bg-ink-500 dark:text-ink-200 dark:border-ink-400';
     }
+  } else if (isBlocked) {
+    verdictLabel = '🚫 BLOQUEADO';
+    verdictCls = 'bg-anomaly-bg text-anomaly border-anomaly-ring/50 dark:bg-anomaly/20 dark:text-anomaly-ring dark:border-anomaly-ring/50';
   } else {
     verdictLabel = '✓ NO SE ESCANEA';
     verdictCls = 'bg-flow-bg text-flow border-flow-ring/50 dark:bg-flow/20 dark:text-flow-ring dark:border-flow-ring/50';
@@ -1161,6 +1137,8 @@ function HistoryRow({ entry, isLatest, canPick, onPick }) {
 
   const baseRowCls = isPending && isRevisar
     ? 'bg-attention-bg/50 border-attention-ring/40 dark:bg-attention/15 dark:border-attention-ring/40'
+    : isBlocked
+    ? 'bg-anomaly-bg/40 border-anomaly-ring/40 dark:bg-anomaly/10 dark:border-anomaly-ring/40'
     : isLatest
     ? 'bg-blue-50 border-rfid/40 dark:bg-rfid/15 dark:border-rfid/40 animate-[fadeIn_.3s_ease]'
     : 'bg-ink-50 border-ink-100 dark:bg-ink-600 dark:border-ink-500';
