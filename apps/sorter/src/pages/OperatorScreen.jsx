@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { BAY_COLORS, CAJA_COUNT } from '../data/demoData.js';
 import { IconScan, IconCheck, IconX } from '../components/Icons.jsx';
 
-export function OperatorScreen() {
+export function OperatorScreen({ realtime }) {
   const { id } = useParams();
   const rawCajaId = id || '';
   const routeBay = /bahia/i.test(rawCajaId) ? parseBayNumber(rawCajaId) : null;
@@ -12,68 +11,12 @@ export function OperatorScreen() {
     Number.isFinite(cajaId) && cajaId >= 1 && cajaId <= CAJA_COUNT;
   const selectedBay = routeBay || 1;
 
-  const [current, setCurrent] = useState(null);
-  const [totalMine, setTotalMine] = useState(0);
-  const [liveStatus, setLiveStatus] = useState('connecting');
-
-  useEffect(() => {
-    setCurrent(null);
-    setTotalMine(0);
-  }, [rawCajaId]);
-
-  const processScan = useCallback((prepack) => {
-    if (!prepack) return;
-    const scan = {
-      ...prepack,
-      id: prepack.scanId || `${prepack.epc}-${Date.now()}`,
-      scannedAt: Date.now(),
-    };
+  const current = realtime.caja.current;
+  const liveStatus = realtime.liveStatus;
+  const totalMine = realtime.caja.history.filter((scan) => {
     const scanBay = scan.correctBay || scan.bahiaActual;
-    const exactCajaId = !!scan.caja_id && scan.caja_id === rawCajaId;
-    const mine = exactCajaId || (scanBay === selectedBay && scan.cajaDestino === cajaId);
-    setCurrent(scan);
-    if (mine) setTotalMine((n) => n + 1);
-  }, [cajaId, rawCajaId, selectedBay]);
-
-  useEffect(() => {
-    let socket;
-    let cancelled = false;
-    const API_URL = import.meta.env.VITE_API_URL || '';
-
-    if (!API_URL) {
-      setLiveStatus('demo');
-      return undefined;
-    }
-
-    (async () => {
-      try {
-        const { io } = await import('socket.io-client');
-        if (cancelled) return;
-
-        socket = io(API_URL, {
-          transports: ['websocket', 'polling'],
-          reconnectionDelay: 800,
-          reconnectionDelayMax: 2500,
-        });
-
-        socket.on('connect', () => setLiveStatus('live'));
-        socket.on('disconnect', () => setLiveStatus('connecting'));
-        socket.on('connect_error', () => setLiveStatus('connecting'));
-
-        socket.on('sorter-caja-pick', (payload) => {
-          const prepack = normalizeCajaPick(payload);
-          if (prepack) processScan(prepack);
-        });
-      } catch {
-        if (!cancelled) setLiveStatus('demo');
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      socket?.disconnect();
-    };
-  }, [processScan]);
+    return scanBay === selectedBay && scan.cajaDestino === cajaId;
+  }).length;
 
   if (!validCaja) {
     return <Navigate to="/sorter/caja/1" replace />;
@@ -105,7 +48,7 @@ export function OperatorScreen() {
           </div>
           <div className="font-mono text-[11px] text-ink-400 truncate">
             {liveStatus === 'live'
-              ? `Lecturas PACKING en vivo · ${totalMine} tomado${totalMine !== 1 ? 's' : ''}`
+              ? `Lecturas del arco en vivo · ${totalMine} tomado${totalMine !== 1 ? 's' : ''}`
               : `Caja ${cajaId} lista · ${totalMine} tomado${totalMine !== 1 ? 's' : ''}`}
           </div>
         </div>
@@ -168,40 +111,6 @@ export function OperatorScreen() {
       </footer>
     </div>
   );
-}
-
-function normalizeCajaPick(payload) {
-  if (!payload) return null;
-
-  const tag = payload.tag || {};
-  const tienda = payload.tienda || tag.tienda || null;
-  const epc = payload.epc || tag.epc;
-  if (!epc) return null;
-
-  const cajaDestino = parseCajaNumber(payload.cajaDestino || payload.caja_id);
-  const correctBay = parseBayNumber(
-    payload.bahiaActual ||
-      payload.bahia ||
-      payload.caja_id ||
-      tienda?.bahia_asignada
-  );
-
-  return {
-    epc,
-    scanId: payload.lectura_id || payload.id || `${epc}-${payload.timestamp || Date.now()}`,
-    orden_id: payload.orden_id || tag.orden_id || tag.pedido_id || '---',
-    producto: payload.producto || tag.producto || tag.sku || 'Prepack sin detalle',
-    tienda,
-    correctBay: correctBay || DEMO_BAY_ID,
-    bahiaActual: correctBay || DEMO_BAY_ID,
-    cajaDestino: cajaDestino || 0,
-    caja_id: payload.caja_id || null,
-    color: tag.color || '—',
-    talla: tag.talla || '—',
-    total_prendas: Number(tag.cantidad_piezas) || 1,
-    qa_fallido: Boolean(tag.qa_fallido),
-    tipo_flujo: tag.tipo_flujo || 'CROSS_DOCK',
-  };
 }
 
 function parseBayNumber(value) {

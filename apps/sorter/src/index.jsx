@@ -7,8 +7,7 @@ import { BahiasList } from './pages/BahiasList.jsx';
 import { BayScreen } from './pages/BayScreen.jsx';
 import { OperatorScreen } from './pages/OperatorScreen.jsx';
 import { CAJA_COUNT } from './data/demoData.js';
-import { listTagsCompletos } from './api/tags.js';
-import { listTiendas } from './api/tiendas.js';
+import { useSorterRealtime } from './hooks/useSorterRealtime.js';
 
 const ACCENT = '#7C3AED';
 
@@ -22,30 +21,8 @@ export function SorterModule() {
   const { session, signOut } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [activeBays, setActiveBays] = useState([1]);
   const [selectedBay, setSelectedBay] = useState(1);
-
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([listTiendas(), listTagsCompletos()])
-      .then(([tiendas, tags]) => {
-        if (cancelled) return;
-        const bays = new Set([1]);
-        for (const tienda of Array.isArray(tiendas) ? tiendas : []) {
-          const bay = parseBahia(tienda.bahia_asignada);
-          if (bay) bays.add(bay);
-        }
-        for (const tag of Array.isArray(tags) ? tags : []) {
-          const bay = parseBahia(tag.tienda?.bahia_asignada);
-          if (bay) bays.add(bay);
-        }
-        setActiveBays([...bays].sort((a, b) => a - b));
-      })
-      .catch(() => {
-        if (!cancelled) setActiveBays([1]);
-      });
-    return () => { cancelled = true; };
-  }, []);
+  const realtime = useSorterRealtime();
 
   useEffect(() => {
     const match = location.pathname.match(/BAHIA-(\d+)/i);
@@ -69,7 +46,10 @@ export function SorterModule() {
         key: 'bahia-selector',
         label: 'Bahia',
         value: selectedBay,
-        options: activeBays.map((bay) => ({ value: bay, label: `Bahia ${bay}` })),
+        options: Array.from({ length: 10 }, (_, index) => ({
+          value: index + 1,
+          label: `Bahia ${index + 1}`,
+        })),
         onChange: (value) => {
           const nextBay = Number(value);
           if (!Number.isFinite(nextBay)) return;
@@ -83,7 +63,7 @@ export function SorterModule() {
       },
       ...boxes,
     ];
-  }, [activeBays, location.pathname, navigate, selectedBay]);
+  }, [location.pathname, navigate, selectedBay]);
 
   return (
     <AppShell
@@ -95,8 +75,8 @@ export function SorterModule() {
     >
       <Routes>
         {/* Default — live scanner view */}
-        <Route path="/" element={<SorterScreen />} />
-        <Route path="cajas" element={<CajaSorterScreen />} />
+        <Route path="/" element={<SorterScreen realtime={realtime} />} />
+        <Route path="cajas" element={<CajaSorterScreen realtime={realtime} />} />
 
         {/* Bay directory */}
         <Route path="bahias" element={<BahiasList />} />
@@ -106,22 +86,14 @@ export function SorterModule() {
         <Route path="bahia/:id" element={<BayScreen />} />
 
         {/* Per-box operator screens. Old /operador route remains as an alias. */}
-        <Route path="caja/:id" element={<OperatorScreen />} />
-        <Route path="operador/:id" element={<OperatorScreen />} />
+        <Route path="caja/:id" element={<OperatorScreen realtime={realtime} />} />
+        <Route path="operador/:id" element={<OperatorScreen realtime={realtime} />} />
 
         {/* Anything else bounces to the scanner */}
         <Route path="*" element={<Navigate to="/sorter" replace />} />
       </Routes>
     </AppShell>
   );
-}
-
-function parseBahia(value) {
-  if (typeof value !== 'string') return null;
-  const match = value.match(/BAHIA-(\d+)|\b(\d+)\b/i);
-  if (!match) return null;
-  const n = Number(match[1] || match[2]);
-  return Number.isFinite(n) && n >= 1 ? n : null;
 }
 
 function parseCajaNumber(value) {

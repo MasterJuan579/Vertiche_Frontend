@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BAY_COLORS } from '../data/demoData.js';
 import { PrepackDetailBar } from '../components/PrepackDetailBar.jsx';
 import { ScanHistory } from '../components/ScanHistory.jsx';
@@ -11,88 +11,27 @@ import {
   IconArrow,
 } from '../components/Icons.jsx';
 
-function parseBahia(s) {
-  if (!s) return null;
-  const m = String(s).match(/(\d+)\s*$/);
-  if (!m) return null;
-  const n = parseInt(m[1], 10);
-  return Number.isFinite(n) && n >= 1 ? n : null;
-}
-
-export function SorterScreen() {
-  const [current, setCurrent] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [liveStatus, setLiveStatus] = useState('connecting');
-  const [scanRate, setScanRate] = useState(0);
-  const [totalScanned, setTotalScanned] = useState(0);
-  const [selected, setSelected] = useState(null);
-
-  const scanTimesRef = useRef([]);
+export function SorterScreen({ realtime }) {
+  const current = realtime.sorter.current;
+  const history = realtime.sorter.history;
+  const totalScanned = realtime.sorter.totalScanned;
+  const liveStatus = realtime.liveStatus;
+  const [selected, setSelected] = useState(current);
+  const [clock, setClock] = useState(Date.now());
 
   useEffect(() => {
-    const id = setInterval(() => {
-      const now = Date.now();
-      scanTimesRef.current = scanTimesRef.current.filter((t) => now - t < 60000);
-      setScanRate(scanTimesRef.current.length);
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const processScan = useCallback((prepack) => {
-    if (!prepack) return;
-    const now = Date.now();
-    const scan = {
-      ...prepack,
-      id: prepack.scanId || `${prepack.epc}-${now}`,
-      scannedAt: now,
-    };
-    scanTimesRef.current = [...scanTimesRef.current, now].filter((t) => now - t < 60000);
-    setScanRate(scanTimesRef.current.length);
-    setTotalScanned((n) => n + 1);
-    setCurrent(scan);
-    setSelected(scan);
-    setHistory((prev) => [scan, ...prev].slice(0, 24));
-  }, []);
+    if (current) setSelected(current);
+  }, [current]);
 
   useEffect(() => {
-    let socket;
-    let cancelled = false;
-    const API_URL = import.meta.env.VITE_API_URL || '';
+    const interval = setInterval(() => setClock(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
-    if (!API_URL) {
-      setLiveStatus('demo');
-      return undefined;
-    }
-
-    (async () => {
-      try {
-        const { io } = await import('socket.io-client');
-        if (cancelled) return;
-
-        socket = io(API_URL, {
-          transports: ['websocket', 'polling'],
-          reconnectionDelay: 800,
-          reconnectionDelayMax: 2500,
-        });
-
-        socket.on('connect', () => setLiveStatus('live'));
-        socket.on('disconnect', () => setLiveStatus('connecting'));
-        socket.on('connect_error', () => setLiveStatus('connecting'));
-
-        socket.on('sorter-scan', (payload) => {
-          const prepack = normalizeSorterScan(payload);
-          if (prepack) processScan(prepack);
-        });
-      } catch {
-        if (!cancelled) setLiveStatus('demo');
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      socket?.disconnect();
-    };
-  }, [processScan]);
+  const scanRate = useMemo(() => {
+    const cutoff = clock - 60000;
+    return history.filter((scan) => scan.scannedAt >= cutoff).length;
+  }, [clock, history]);
 
   const bayColor = current
     ? BAY_COLORS[current.bayNumber] || '#6b7280'
@@ -184,73 +123,6 @@ export function SorterScreen() {
       </div>
     </div>
   );
-}
-
-function normalizeSorterScan(payload) {
-  if (!payload) return null;
-
-  const prepack = payload.prepack || payload.sorterPrepack || {};
-  const tag = prepack.tag || payload.tag || {};
-  const tienda = prepack.tienda || tag.tienda || tag.Tienda || null;
-  const etapa = String(payload.etapa || payload.lectura?.etapa || '').toUpperCase();
-
-  if (etapa && etapa !== 'SORTING') return null;
-
-  const epc = prepack.epc || tag.epc || payload.epc;
-  if (!epc) return null;
-
-  const correctBay = parseBayNumber(
-    prepack.correctBay ||
-      prepack.correct_bay ||
-      tag.correctBay ||
-      tag.correct_bay ||
-      tienda?.bahia_asignada
-  );
-  const actualBay = parseBayNumber(
-    prepack.bayNumber ||
-      prepack.bahiaActual ||
-      prepack.bahia_actual ||
-      payload.bahia ||
-      payload.lectura?.bahia
-  );
-  const bayNumber = actualBay || correctBay || 0;
-
-  return {
-    epc,
-    scanId: payload.lectura_id || payload.id || `${epc}-${payload.timestamp || Date.now()}`,
-    orden_id: prepack.orden_id || tag.orden_id || tag.pedido_id || '—',
-    producto: prepack.producto || tag.producto || tag.sku || 'Prepack sin detalle',
-    proveedor: prepack.proveedor || tag.proveedor?.nombre || tag.Proveedor?.nombre || '—',
-    tienda,
-    bayNumber,
-    correctBay: correctBay || bayNumber,
-    cajaDestino: prepack.cajaDestino || null,
-    isMisrouted: Boolean(actualBay && correctBay && actualBay !== correctBay),
-    prendas: normalizePrendas(prepack.prendas, tag),
-    colores: tag.color ? [tag.color] : [],
-    tallas: tag.talla ? [tag.talla] : [],
-    total_prendas: Number(tag.cantidad_piezas) || 1,
-    color: tag.color || '—',
-    talla: tag.talla || '—',
-    qa_fallido: Boolean(prepack.qa_fallido || tag.qa_fallido),
-    tipo_flujo: prepack.tipo_flujo || tag.tipo_flujo || 'CROSS_DOCK',
-  };
-}
-
-function parseBayNumber(value) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value !== 'string') return null;
-  const match = value.match(/\d+/);
-  return match ? Number(match[0]) : null;
-}
-
-function normalizePrendas(prendas, tag) {
-  if (Array.isArray(prendas) && prendas.length > 0) return prendas;
-  const count = Math.max(1, Number(tag?.cantidad_piezas) || 1);
-  return Array.from({ length: count }, () => ({
-    color: tag?.color || '—',
-    talla: tag?.talla || '—',
-  }));
 }
 
 // ══════════════════════════════════════════════════════════════════
