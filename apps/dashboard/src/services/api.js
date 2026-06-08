@@ -1,11 +1,13 @@
 import { apiGet } from '@vertiche/design-system';
 
-function normalizeList(payload) {
+function normalizeList(payload, endpoint) {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.data)) return payload.data;
   if (Array.isArray(payload?.items)) return payload.items;
   if (Array.isArray(payload?.result)) return payload.result;
   if (Array.isArray(payload?.rows)) return payload.rows;
+  // eslint-disable-next-line no-console
+  console.warn(`[dashboard] normalizeList: shape no reconocida en ${endpoint}`, payload);
   return [];
 }
 
@@ -28,7 +30,7 @@ function classifyError(err) {
 
 async function getList(endpoint) {
   try {
-    return normalizeList(await apiGet(endpoint));
+    return normalizeList(await apiGet(endpoint), endpoint);
   } catch (err) {
     const classified = classifyError(err);
     if (classified.type === 'not_found') return [];
