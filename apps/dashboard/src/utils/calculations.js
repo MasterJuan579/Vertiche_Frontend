@@ -1,5 +1,13 @@
 import { STAGES } from './constants';
 
+const _warned = new Set();
+function warnOnce(key, message, sample) {
+  if (_warned.has(key)) return;
+  _warned.add(key);
+  // eslint-disable-next-line no-console
+  console.warn(`[dashboard] ${message}`, sample);
+}
+
 export function toNumber(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
@@ -10,6 +18,14 @@ export function isActiveAnomaly(anomalia) {
 }
 
 export function getCumplimiento(pedidos) {
+  if (pedidos.length > 0) {
+    const sample = pedidos[0];
+    if (sample.total_esperados === undefined && sample.totalEsperados === undefined)
+      warnOnce('pedido.esperados', 'getCumplimiento: ningún pedido tiene total_esperados ni totalEsperados', sample);
+    if (sample.total_recibidos === undefined && sample.totalRecibidos === undefined)
+      warnOnce('pedido.recibidos', 'getCumplimiento: ningún pedido tiene total_recibidos ni totalRecibidos', sample);
+  }
+
   const totalEsperados = pedidos.reduce(
     (sum, pedido) => sum + toNumber(pedido.total_esperados ?? pedido.totalEsperados),
     0,
@@ -43,7 +59,7 @@ export function getRecentEvents(eventos, minutes = 5) {
   return eventos.filter((evento) => {
     const rawDate = evento.timestamp ?? evento.fecha_hora ?? evento.createdAt;
     const date = rawDate ? new Date(rawDate) : null;
-    if (!date || Number.isNaN(date.getTime())) return true;
+    if (!date || Number.isNaN(date.getTime())) return false;
     return now - date.getTime() <= windowMs;
   });
 }
@@ -74,15 +90,13 @@ export function getStageItems(stageKey, data) {
         ? data.inspecciones
         : data.tags.filter((tag) => matchesAnyStage(tag, 'QA'));
     case 'registro':
-      return data.tags.filter(
-        (tag) => matchesAnyStage(tag, 'REGISTRO') || normalizeStage(tag.estado).includes('REGISTRADO'),
-      );
+      return data.tags.filter((tag) => normalizeStage(tag.etapa_actual) === 'APROBADO');
     case 'sorter':
       return getRecentEvents(data.eventos, 5).filter((evento) => matchesAnyStage(evento, 'SORTER') || matchesAnyStage(evento, 'SORTING'));
     case 'bahia':
       return [
         ...data.eventos.filter((evento) => matchesAnyStage(evento, 'PACKING') || matchesAnyStage(evento, 'BAHIA')),
-        ...data.cajas.filter((caja) => matchesAnyStage(caja, 'BAHIA') || matchesAnyStage(caja, 'PACKING')),
+        ...data.cajas.filter((caja) => caja.estado === 'ABIERTA' || caja.estado === 'EN_LLENADO'),
       ];
     case 'auditoria':
       return data.tags.filter(
@@ -113,8 +127,8 @@ export function getThroughputBuckets(eventos) {
   eventos.forEach((evento) => {
     const rawDate = evento.timestamp ?? evento.fecha_hora ?? evento.createdAt;
     const date = rawDate ? new Date(rawDate) : null;
-    const hour = date && !Number.isNaN(date.getTime()) ? date.getHours() : null;
-    const key = hour === null ? '--' : `${String(hour).padStart(2, '0')}:00`;
+    if (!date || Number.isNaN(date.getTime())) return;
+    const key = `${String(date.getHours()).padStart(2, '0')}:00`;
     counts.set(key, (counts.get(key) || 0) + 1);
   });
 
