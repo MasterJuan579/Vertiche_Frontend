@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { epcCorto, haceCuanto } from '../utils/format.js';
 import { realApi } from '../services/realApi.js';
 import { onSocket } from '../services/socketClient.js';
@@ -681,8 +681,11 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
   // líneas. Cada línea es (sku, talla, color, cantidad), de modo que un
   // prepack puede mezclar productos, tallas y colores. Ejemplo:
   //   Prepack → Tienda CDMX-POL → 2 playeras M rojas + 3 S verdes + 2 L azules
+  // El `id` es solo para usar como React `key` estable — evita que un
+  // PrepackCard pierda focus/estado cuando se inserta otro prepack arriba.
   const nuevaLinea = (sku = '') => ({ sku, talla: 'M', color: '', cantidad: 1 });
   const nuevoPrepack = () => ({
+    id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `p-${Math.random().toString(36).slice(2)}`,
     tienda_id: tiendas[0]?.tienda_id || '',
     copias: 1,
     lineas: [nuevaLinea()],
@@ -697,7 +700,9 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
   // ── Mutadores de prepacks ──────────────────────────────────
   const setPrepack = (pi, k, v) =>
     setPrepacks((arr) => arr.map((p, i) => (i === pi ? { ...p, [k]: v } : p)));
-  const addPrepack = () => setPrepacks((arr) => [...arr, nuevoPrepack()]);
+  // Prepacks nuevos se insertan al inicio para que el más reciente quede
+  // visible sin tener que hacer scroll hasta el final del modal.
+  const addPrepack = () => setPrepacks((arr) => [nuevoPrepack(), ...arr]);
   const delPrepack = (pi) =>
     setPrepacks((arr) => (arr.length <= 1 ? arr : arr.filter((_, i) => i !== pi)));
 
@@ -849,7 +854,7 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
             <div className="space-y-3">
               {prepacks.map((p, pi) => (
                 <PrepackCard
-                  key={pi}
+                  key={p.id || pi}
                   index={pi}
                   prepack={p}
                   piezas={piezasDe(p)}
@@ -1005,16 +1010,52 @@ const COLORES_PALETA = [
  * Selector visual de color. Muestra la paleta cerrada como swatches y un
  * input libre para colores fuera de la lista. Normaliza el valor para que
  * "azul" / "AZUL" / "Azul" se guarden como "Azul" (Title Case).
+ *
+ * El popover se renderiza con `position: fixed` y coordenadas calculadas
+ * desde el rect del trigger, así escapa del `overflow-y-auto` del modal
+ * (antes se cortaba cuando el ColorPicker estaba cerca del fondo).
+ * Auto-flip: si no cabe abajo abre arriba, si no cabe a la derecha
+ * alinea por la derecha.
  */
 function ColorPicker({ value, onChange }) {
   const [abierto, setAbierto] = useState(false);
+  const [pos, setPos] = useState(null);
+  const triggerRef = useRef(null);
   const seleccionado = COLORES_PALETA.find((c) => normalizeColor(c.nombre) === normalizeColor(value));
   const hex = seleccionado?.hex || '#94A3B8';
-  const esClaro = ['#F8FAFC', '#D4B896', '#EAB308'].includes(hex);
+
+  const POPOVER_W = 220;
+  const POPOVER_H = 200; // estimado: 3 filas swatches + input
+  const MARGIN = 8;
+
+  // Calcula coordenadas en `fixed` cada vez que se abre, y al hacer scroll/resize.
+  useLayoutEffect(() => {
+    if (!abierto) return;
+    const recalc = () => {
+      const el = triggerRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const cabeAbajo = r.bottom + POPOVER_H + MARGIN <= vh;
+      const top = cabeAbajo ? r.bottom + 4 : Math.max(MARGIN, r.top - POPOVER_H - 4);
+      const cabeDerecha = r.left + POPOVER_W <= vw - MARGIN;
+      const left = cabeDerecha ? r.left : Math.max(MARGIN, r.right - POPOVER_W);
+      setPos({ top, left });
+    };
+    recalc();
+    window.addEventListener('scroll', recalc, true); // capture: atrapa scroll del modal interno
+    window.addEventListener('resize', recalc);
+    return () => {
+      window.removeEventListener('scroll', recalc, true);
+      window.removeEventListener('resize', recalc);
+    };
+  }, [abierto]);
 
   return (
-    <div className="relative">
+    <>
       <button
+        ref={triggerRef}
         type="button"
         onClick={() => setAbierto((v) => !v)}
         className="w-full px-2 py-1.5 rounded text-[12px] outline-none bg-white border border-ink-100 text-ink-700 hover:border-rfid focus:border-rfid dark:bg-ink-700 dark:border-ink-500 dark:text-ink-100 flex items-center gap-2"
@@ -1027,10 +1068,19 @@ function ColorPicker({ value, onChange }) {
         <span className="text-[8px] opacity-60">▾</span>
       </button>
 
-      {abierto && (
+      {abierto && pos && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setAbierto(false)} />
-          <div className="absolute z-50 mt-1 left-0 w-[220px] rounded-card border bg-white border-ink-100 shadow-xl dark:bg-ink-700 dark:border-ink-600 p-2">
+          {/* Overlay para cerrar al click fuera */}
+          <div
+            className="fixed inset-0 z-[60]"
+            onClick={() => setAbierto(false)}
+          />
+          {/* Popover en position: fixed con coords calculadas */}
+          <div
+            className="fixed z-[61] rounded-card border bg-white border-ink-100 shadow-xl dark:bg-ink-700 dark:border-ink-600 p-2"
+            style={{ top: pos.top, left: pos.left, width: POPOVER_W }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="grid grid-cols-5 gap-1.5">
               {COLORES_PALETA.map((c) => {
                 const activo = normalizeColor(c.nombre) === normalizeColor(value);
@@ -1058,7 +1108,7 @@ function ColorPicker({ value, onChange }) {
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }
 

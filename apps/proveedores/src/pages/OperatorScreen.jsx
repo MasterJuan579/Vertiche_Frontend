@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useAuth } from '@vertiche/design-system';
 import { OperatorBar } from '../components/OperatorBar.jsx';
 import { NivelBadge } from '../components/NivelBadge.jsx';
 import { Stars } from '../components/Stars.jsx';
 import {
   crearInspeccion,
   escanearPrepack,
-  fetchCatalogoDefectos,
   fetchPendientes,
 } from '../api/proveedores.js';
-import { DEFECT_ICONS, DEFECT_TYPES, MOCK_EPCS } from '../data/demoData.js';
+import { DEFECT_TYPES, MOCK_EPCS } from '../data/demoData.js';
 import { useScanSocket } from '../lib/useScanSocket.js';
 
 // Tiempo (ms) que se muestra el banner "NO SE ESCANEA" antes de regresar a idle.
 const PASA_AUTO_DISMISS_MS = 3000;
+
+// Máximo de escaneos que mantenemos en el historial visible.
+const MAX_HISTORY = 20;
+
+// ID del operador a usar en el payload de inspección.
+// Hardcodeado mientras no haya Cognito integrado. El backend espera UUID.
+const OPERADOR_ID_HARDCODED = 'a1b2c3d4-2222-4444-aaaa-000000000002';
 
 // Máquina de estados:
 //   idle     → mostrando input de escaneo
@@ -45,25 +50,6 @@ function previsualizarResultado(count) {
 }
 
 export function OperatorScreen() {
-  const { session } = useAuth();
-
-  // ─── Catálogo de defectos (cargado desde backend, fallback a DEFECT_TYPES) ───
-  const [availableDefects, setAvailableDefects] = useState(DEFECT_TYPES);
-
-  useEffect(() => {
-    fetchCatalogoDefectos()
-      .then((data) => {
-        setAvailableDefects(
-          data
-            .filter((d) => d.activo)
-            .map((d) => ({ cat: d.nombre, icon: DEFECT_ICONS[d.nombre] || '⚠️' }))
-        );
-      })
-      .catch(() => {
-        // Backend no disponible → se mantiene DEFECT_TYPES hardcodeado
-      });
-  }, []);
-
   // ─── Pendientes ────────────────────────────────────
   const [pendientes, setPendientes] = useState([]);
   const [pendientesLoading, setPendientesLoading] = useState(true);
@@ -91,6 +77,24 @@ export function OperatorScreen() {
 
   const [counter, setCounter] = useState(1);
 
+  // ─── Historial / cola de escaneos ───
+  // Cada entrada conserva la respuesta completa del backend para poder
+  // "retomar" un REVISAR que llegó mientras estábamos ocupados.
+  //   { id, timestamp, source, status, data }
+  //   status: 'pending'   → REVISAR sin inspeccionar todavía (clickeable)
+  //           'completed' → ya inspeccionado, o un PASA (informativo)
+  const [scanHistory, setScanHistory] = useState([]);
+
+  const buildHistoryEntry = (data, source) => ({
+    id:        Date.now() + Math.random(),
+    timestamp: new Date(),
+    source,                                 // 'rfid' | 'manual'
+    status:    String(data?.accion || '').toUpperCase() === 'PASA'
+                 ? 'completed'
+                 : 'pending',
+    data,                                   // shape de /PlanQA/escanear
+  });
+
   // ─── Acciones ──────────────────────────────────────
   const reset = () => {
     setFlow(F_IDLE);
@@ -113,11 +117,10 @@ export function OperatorScreen() {
 
       setScanData(data);
 
-      if (decision === 'PASA') {
-        setFlow(F_PASA);
-      } else if (decision === 'REVISAR') {
-        // Automático: abrimos el formulario de inspección directo.
-        setFlow(F_INSPECT);
+      if (decision === 'PASA' || decision === 'REVISAR') {
+        setScanHistory((h) => [buildHistoryEntry(data, 'manual'), ...h].slice(0, MAX_HISTORY));
+        // Automático: abrimos banner verde o formulario directo según el caso.
+        setFlow(decision === 'PASA' ? F_PASA : F_INSPECT);
       } else {
         console.warn('Respuesta inesperada de /PlanQA/escanear:', data);
         setScanError(`Respuesta inesperada del servidor: ${JSON.stringify(data)}`);
@@ -144,6 +147,22 @@ export function OperatorScreen() {
     reset();
   };
 
+  // Click en una entrada pendiente del historial → la convierte en la inspección activa.
+  const handlePickPending = (entry) => {
+    if (!entry || entry.status !== 'pending') return;
+    if (flow === F_SUBMIT) return; // no podemos cambiar a media transacción
+
+    setScanData(entry.data);
+    setScanInput(entry.data?.epc || '');
+    setScanError(null);
+    setDefectTypes([]);
+    setOtherText('');
+    setNotes('');
+    setSubmitError(null);
+    setSubmitResponse(null);
+    setFlow(F_INSPECT);
+  };
+
   // ─── WebSocket: escuchar escaneos en tiempo real ───
   // Usamos un ref para conocer el estado actual sin romper la identidad del
   // handler (que solo se crea una vez).
@@ -152,13 +171,21 @@ export function OperatorScreen() {
 
   const handleSocketScan = useCallback((data) => {
     const current = flowRef.current;
-    // Si el inspector está en plena captura, enviando, o viendo el éxito de
-    // la inspección anterior, no interrumpimos.
-    if (current === F_INSPECT || current === F_SUBMIT || current === F_SCANNING || current === F_SUCCESS) {
-      console.log('[socket] qa-escaneo ignorado (estado activo):', current);
+    const decision = String(data?.accion || '').toUpperCase();
+
+    // Siempre encolamos en el historial, aunque el inspector esté ocupado
+    // con otro prepack. Los REVISAR pendientes podrán retomarse con click.
+    setScanHistory((h) => [buildHistoryEntry(data, 'rfid'), ...h].slice(0, MAX_HISTORY));
+
+    // Solo cambiamos la pantalla activa si estamos esperando un escaneo:
+    // - F_IDLE: pantalla limpia, podemos abrir banner/formulario
+    // - F_PASA: ya hay un banner verde; lo reemplazamos con el nuevo evento
+    // En cualquier otro estado (inspeccionando, enviando, success), solo encolamos.
+    if (current !== F_IDLE && current !== F_PASA) {
+      console.log('[socket] escaneo encolado (estado activo:', current + '):', data?.epc);
       return;
     }
-    const decision = String(data?.accion || '').toUpperCase();
+
     setScanData(data);
     setScanError(null);
     setScanInput(data?.epc || '');
@@ -203,7 +230,7 @@ export function OperatorScreen() {
     const payload = {
       tag_epc:      scanData?.epc,
       proveedor_id: scanData?.proveedor_id ?? null,
-      operador_id:  session?.user?.sub,
+      operador_id:  OPERADOR_ID_HARDCODED,
       defectos,
       observacion,
       fecha:        new Date().toISOString(),
@@ -215,6 +242,23 @@ export function OperatorScreen() {
       setSubmitResponse(response);
       setFlow(F_SUCCESS);
       loadPendientes(); // refresca el contador de pendientes con el nuevo estado
+
+      // Marca la entrada correspondiente del historial como completada
+      // (solo el primer pendiente que matchee el EPC; podría haber duplicados
+      // si llegó varias veces).
+      const epcGuardado = scanData?.epc;
+      if (epcGuardado) {
+        setScanHistory((h) => {
+          let alreadyMarked = false;
+          return h.map((e) => {
+            if (!alreadyMarked && e.status === 'pending' && e.data?.epc === epcGuardado) {
+              alreadyMarked = true;
+              return { ...e, status: 'completed', completedAt: new Date() };
+            }
+            return e;
+          });
+        });
+      }
 
       // Volvemos solitos a idle tras unos segundos.
       setTimeout(() => {
@@ -260,10 +304,18 @@ export function OperatorScreen() {
         <PasaResult data={scanData} onScanNext={handleScanNext} />
       )}
 
+      {/* Historial visible siempre excepto en el banner de éxito */}
+      {flow !== F_SUCCESS && (
+        <ScanHistoryPanel
+          history={scanHistory}
+          onPickPending={handlePickPending}
+          canPick={flow === F_IDLE || flow === F_PASA}
+        />
+      )}
+
       {(flow === F_INSPECT || flow === F_SUBMIT) && (
         <RevisarFlow
           data={scanData}
-          availableDefects={availableDefects}
           defectTypes={defectTypes}
           onToggleDefect={toggleDefect}
           otherText={otherText}
@@ -597,7 +649,7 @@ function PasaResult({ data, onScanNext }) {
 // ════════════════════════════════════════════════════════════════════
 
 function RevisarFlow({
-  data, availableDefects, defectTypes, onToggleDefect, otherText, setOtherText, notes, setNotes,
+  data, defectTypes, onToggleDefect, otherText, setOtherText, notes, setNotes,
   onSubmit, onCancel, submitting, error,
 }) {
   const hasOther = defectTypes.includes('Otro (especificar)');
@@ -662,7 +714,7 @@ function RevisarFlow({
             Marca los defectos encontrados (déjalo vacío si la inspección sale OK)
           </div>
           <div className="grid grid-cols-2 gap-2">
-            {availableDefects.map((d) => {
+            {DEFECT_TYPES.map((d) => {
               const selected = defectTypes.includes(d.cat);
               return (
                 <label
@@ -853,14 +905,23 @@ function SuccessResult({ response, scanData, onContinue }) {
         <div className="text-sm font-display font-medium text-ink-700 dark:text-ink-100">
           Inspección registrada · {response?.defectos_encontrados ?? 0} defecto(s)
         </div>
-        {response?.score != null && (
-          <div className="text-xs text-ink-500 dark:text-ink-300 mt-2">
-            Score: <span className="font-mono font-semibold">{response.score}</span>
-            {response?.inspeccion_id != null && (
-              <> · ID #{response.inspeccion_id}</>
-            )}
-          </div>
-        )}
+        <div className="text-xs text-ink-500 dark:text-ink-300 mt-2 space-x-1">
+          {response?.score != null && (
+            <span>Score: <span className="font-mono font-semibold">{response.score}</span></span>
+          )}
+          {starsBefore != null && starsAfter != null && (
+            <span>
+              · Proveedor pasó de{' '}
+              <span className="font-mono font-semibold">{Number(starsBefore).toFixed(1)}</span>{' '}
+              a{' '}
+              <span className="font-mono font-semibold">{Number(starsAfter).toFixed(1)}</span>{' '}
+              estrellas
+            </span>
+          )}
+          {response?.inspeccion_id != null && (
+            <span className="text-ink-400">· ID #{response.inspeccion_id}</span>
+          )}
+        </div>
       </div>
 
       {/* Detalle del proveedor con delta de stars */}
@@ -949,4 +1010,190 @@ function SocketStatus({ connected }) {
       </span>
     </div>
   );
+}
+
+// ════════════════════════════════════════════════════════════════════
+// SCAN HISTORY PANEL — cola con los últimos prepacks detectados
+// ════════════════════════════════════════════════════════════════════
+
+function ScanHistoryPanel({ history, onPickPending, canPick }) {
+  const totals = history.reduce(
+    (acc, e) => {
+      const accion = String(e.data?.accion || '').toUpperCase();
+      if (accion === 'REVISAR') {
+        if (e.status === 'pending') acc.pendientes += 1;
+        else acc.inspeccionados += 1;
+      } else if (accion === 'PASA') {
+        acc.pasa += 1;
+      }
+      return acc;
+    },
+    { pendientes: 0, inspeccionados: 0, pasa: 0 }
+  );
+
+  return (
+    <div className="mt-4 bg-white border border-ink-100 rounded-card p-4 shadow-card dark:bg-ink-700 dark:border-ink-600">
+      {/* Header con totales */}
+      <div className="flex items-center justify-between mb-3 pb-3 border-b border-ink-100 dark:border-ink-600">
+        <div>
+          <div className="text-[10px] font-display font-medium uppercase tracking-industrial text-ink-400">
+            Historial de escaneos
+          </div>
+          {totals.pendientes > 0 && (
+            <div className="text-[11px] text-attention dark:text-attention-ring font-display font-semibold mt-0.5">
+              {totals.pendientes} pendiente{totals.pendientes !== 1 ? 's' : ''} en cola
+              {canPick ? ' · clic para inspeccionar' : ' · termina el actual primero'}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <HistoryStat label="Pendientes"     value={totals.pendientes}     tone="attention" pulse={totals.pendientes > 0} />
+          <HistoryStat label="Inspeccionados" value={totals.inspeccionados} tone="ink" />
+          <HistoryStat label="Pasaron"        value={totals.pasa}           tone="flow" />
+          <HistoryStat label="Total"          value={history.length}        tone="ink" />
+        </div>
+      </div>
+
+      {/* Lista */}
+      {history.length === 0 ? (
+        <div className="text-center py-6 text-xs text-ink-400">
+          Aún no se ha escaneado ningún prepack en esta sesión.
+        </div>
+      ) : (
+        <div className="space-y-1.5 max-h-[420px] overflow-y-auto pr-1">
+          {history.map((entry, idx) => (
+            <HistoryRow
+              key={entry.id}
+              entry={entry}
+              isLatest={idx === 0}
+              canPick={canPick}
+              onPick={() => onPickPending?.(entry)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HistoryStat({ label, value, tone, pulse }) {
+  const cls = {
+    flow:      'text-flow dark:text-flow-ring',
+    attention: 'text-attention dark:text-attention-ring',
+    ink:       'text-ink-700 dark:text-ink-100',
+  }[tone];
+  return (
+    <div className="text-right">
+      <div className="text-[9px] font-display font-medium uppercase tracking-industrial text-ink-400">
+        {label}
+      </div>
+      <div className={
+        'font-mono text-base font-semibold leading-none ' + cls +
+        (pulse ? ' animate-pulse' : '')
+      }>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function HistoryRow({ entry, isLatest, canPick, onPick }) {
+  const data = entry.data || {};
+  const accion = String(data.accion || '').toUpperCase();
+  const isRevisar = accion === 'REVISAR';
+  const isPending = entry.status === 'pending';
+  const isClickable = isRevisar && isPending && canPick;
+
+  // Pill del veredicto
+  let verdictLabel;
+  let verdictCls;
+  if (isRevisar) {
+    if (isPending) {
+      verdictLabel = '⏳ PENDIENTE';
+      verdictCls = 'bg-attention-bg text-attention border-attention-ring/50 dark:bg-attention/20 dark:text-attention-ring dark:border-attention-ring/50';
+    } else {
+      verdictLabel = '🔍 INSPECCIONADO';
+      verdictCls = 'bg-ink-100 text-ink-500 border-ink-200 dark:bg-ink-500 dark:text-ink-200 dark:border-ink-400';
+    }
+  } else {
+    verdictLabel = '✓ NO SE ESCANEA';
+    verdictCls = 'bg-flow-bg text-flow border-flow-ring/50 dark:bg-flow/20 dark:text-flow-ring dark:border-flow-ring/50';
+  }
+
+  const sourceLabel = entry.source === 'rfid'
+    ? 'RFID'
+    : entry.source === 'manual'
+    ? 'Manual'
+    : entry.source === 'postman'
+    ? 'Postman'
+    : '—';
+
+  const baseRowCls = isPending && isRevisar
+    ? 'bg-attention-bg/50 border-attention-ring/40 dark:bg-attention/15 dark:border-attention-ring/40'
+    : isLatest
+    ? 'bg-blue-50 border-rfid/40 dark:bg-rfid/15 dark:border-rfid/40 animate-[fadeIn_.3s_ease]'
+    : 'bg-ink-50 border-ink-100 dark:bg-ink-600 dark:border-ink-500';
+
+  const interactiveCls = isClickable
+    ? 'cursor-pointer hover:border-attention-ring hover:shadow-md dark:hover:border-attention-ring transition-all'
+    : isPending && isRevisar
+    ? 'cursor-not-allowed opacity-90'
+    : '';
+
+  const content = (
+    <>
+      {/* Veredicto */}
+      <span className={
+        'inline-flex items-center px-2.5 py-1 rounded-md border font-display text-[11px] font-semibold uppercase tracking-industrial shrink-0 ' +
+        verdictCls
+      }>
+        {verdictLabel}
+      </span>
+
+      {/* EPC + datos del producto */}
+      <div className="flex-1 min-w-0">
+        <div className="font-mono text-[12px] text-ink-700 dark:text-ink-100 truncate">
+          {data.epc || '—'}
+        </div>
+        <div className="text-[11px] text-ink-400 truncate mt-0.5">
+          {data.proveedor_nombre || 'Proveedor desconocido'}
+          {data.sku   && (<> · <span className="font-mono">{data.sku}</span></>)}
+          {data.talla && (<> · {data.talla}</>)}
+          {data.color && (<> · {data.color}</>)}
+        </div>
+      </div>
+
+      {/* Origen + hora + (CTA si pendiente clickeable) */}
+      <div className="text-right shrink-0">
+        <div className="text-[10px] uppercase tracking-industrial text-ink-400">
+          {sourceLabel}
+        </div>
+        <div className="font-mono text-[11px] text-ink-500 dark:text-ink-300 mt-0.5">
+          {formatTime(entry.timestamp)}
+        </div>
+        {isClickable && (
+          <div className="text-[10px] font-display font-semibold text-attention dark:text-attention-ring mt-1 uppercase tracking-industrial">
+            Inspeccionar →
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  const className = 'flex items-center gap-3 px-3 py-2.5 rounded-card border ' + baseRowCls + ' ' + interactiveCls;
+
+  if (isClickable) {
+    return (
+      <button type="button" onClick={onPick} className={'w-full text-left ' + className}>
+        {content}
+      </button>
+    );
+  }
+  return <div className={className}>{content}</div>;
+}
+
+function formatTime(date) {
+  if (!date) return '';
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
