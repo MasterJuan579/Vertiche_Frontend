@@ -95,6 +95,35 @@ export function OperatorScreen() {
     data,                                   // shape de /PlanQA/escanear
   });
 
+  // Agrega una entrada al historial evitando duplicados por EPC.
+  //
+  // El backend emite dos eventos por un mismo escaneo RFID:
+  //   1. `lectura`     → el front llama a /PlanQA/escanear y procesa la respuesta
+  //   2. `qa-escaneo`  → el backend lo emite al terminar /PlanQA/escanear
+  // Ambos terminan en este helper. Si un EPC ya existe en el historial, no se
+  // agrega otro y, si fuera necesario, se actualiza la entrada existente con
+  // los datos más recientes (el segundo payload a veces trae más info).
+  const addHistoryEntry = (data, source) => {
+    setScanHistory((h) => {
+      const epc = data?.epc;
+      if (epc) {
+        const existing = h.find((e) => e.data?.epc === epc);
+        if (existing) {
+          console.log('[history] EPC ya está en historial, se ignora duplicado:', epc);
+          // Enriquecemos el entry existente con datos que pudieran venir mejor
+          // en el segundo evento (proveedor_nombre, sku, talla, color, etc.),
+          // sin tocar su id, timestamp ni status.
+          return h.map((e) => (
+            e.id === existing.id
+              ? { ...e, data: { ...e.data, ...data } }
+              : e
+          ));
+        }
+      }
+      return [buildHistoryEntry(data, source), ...h].slice(0, MAX_HISTORY);
+    });
+  };
+
   // ─── Acciones ──────────────────────────────────────
   const reset = () => {
     setFlow(F_IDLE);
@@ -118,7 +147,7 @@ export function OperatorScreen() {
       setScanData(data);
 
       if (decision === 'PASA' || decision === 'REVISAR') {
-        setScanHistory((h) => [buildHistoryEntry(data, 'manual'), ...h].slice(0, MAX_HISTORY));
+        addHistoryEntry(data, 'manual');
         // Automático: abrimos banner verde o formulario directo según el caso.
         setFlow(decision === 'PASA' ? F_PASA : F_INSPECT);
       } else {
@@ -175,7 +204,9 @@ export function OperatorScreen() {
 
     // Siempre encolamos en el historial, aunque el inspector esté ocupado
     // con otro prepack. Los REVISAR pendientes podrán retomarse con click.
-    setScanHistory((h) => [buildHistoryEntry(data, 'rfid'), ...h].slice(0, MAX_HISTORY));
+    // addHistoryEntry dedupea por EPC, así evitamos que el doble evento del
+    // backend (`lectura` + `qa-escaneo` para el mismo escaneo) cree dos filas.
+    addHistoryEntry(data, 'rfid');
 
     // Solo cambiamos la pantalla activa si estamos esperando un escaneo:
     // - F_IDLE: pantalla limpia, podemos abrir banner/formulario
