@@ -17,6 +17,39 @@ export const ETAPAS_FLUJO = [
 
 export const ETAPA_IDX = Object.fromEntries(ETAPAS_FLUJO.map((e, i) => [e.id, i]));
 
+// Orden visual del Gantt; útil para "han pasado por X etapa".
+export const ETAPAS_ORDEN = ETAPAS_FLUJO.map((e) => e.id);
+
+// Mapeo del enum `Tag.etapa_actual` del backend al id de la columna del
+// Gantt. Centralizado aquí para que el componente Modal y el Gantt usen
+// la misma fuente de verdad.
+export const ETAPA_DB_TO_GANTT = {
+  REGISTRADO:   'PREREGISTRO',
+  EN_QA:        'QA',
+  APROBADO:     'REGISTRO',
+  EN_SORTING:   'SORTER',
+  EN_CAJA:      'BAHIA',
+  EN_AUDITORIA: 'AUDITORIA',
+  RECHAZADO:    'QA',
+  ENVIADO:      'ENVIO',
+};
+
+export function etapaGanttDeTag(tag) {
+  if (!tag) return null;
+  return ETAPA_DB_TO_GANTT[tag.etapa_actual] || null;
+}
+
+// True si el tag está en o ha avanzado más allá de `etapaGantt`. Útil para
+// contar "cuántos prepacks han pasado por Bahía" aunque ya estén en Envío.
+export function tagHaPasadoPorEtapa(tag, etapaGantt) {
+  const eg = etapaGanttDeTag(tag);
+  if (!eg) return false;
+  const idxTag = ETAPA_IDX[eg];
+  const idxEtapa = ETAPA_IDX[etapaGantt];
+  if (idxTag == null || idxEtapa == null) return false;
+  return idxTag >= idxEtapa;
+}
+
 export const ETAPA_COLORS = {
   // IDs del Gantt visual
   PREREGISTRO: '#2563EB',
