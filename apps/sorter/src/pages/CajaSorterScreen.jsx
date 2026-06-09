@@ -79,7 +79,7 @@ export function CajaSorterScreen({ realtime }) {
           {!current ? (
             <EmptyState />
           ) : (
-            <CurrentCaja current={current} bayColor={bayColor} />
+            <CurrentCaja key={current.scanId} current={current} bayColor={bayColor} />
           )}
         </main>
 
@@ -135,6 +135,8 @@ function EmptyState() {
 function CurrentCaja({ current, bayColor }) {
   return (
     <div className="w-full flex flex-col items-center gap-5 sm:gap-7 animate-[fadeIn_.3s_ease]">
+      <NewLoadBanner current={current} accentColor={bayColor} />
+
       <p className="font-mono text-xs uppercase tracking-industrial text-ink-400">
         En Bahia {current.bahiaActual}, llevar a
       </p>
@@ -166,6 +168,30 @@ function CurrentCaja({ current, bayColor }) {
         <div className="hidden sm:block w-px h-8 bg-ink-100 dark:bg-ink-600" />
         <SmallValue label="Orden" value={current.orden_id || '---'} color={bayColor} />
       </div>
+    </div>
+  );
+}
+
+function NewLoadBanner({ current, accentColor }) {
+  const isDuplicate = current.isDuplicatePrepack;
+  const bannerColor = isDuplicate ? '#ef4444' : accentColor;
+
+  return (
+    <div
+      className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-5 py-2.5 rounded-card border-2 bg-white shadow-card dark:bg-ink-700"
+      style={{ borderColor: bannerColor }}
+    >
+      <span
+        className="font-display text-base font-black uppercase tracking-industrial"
+        style={{ color: bannerColor }}
+      >
+        {isDuplicate
+          ? 'Ya escaneado - escanee otro'
+          : `Nueva carga #${String(current.loadNumber || 1).padStart(3, '0')}`}
+      </span>
+      <span className="font-mono text-xs font-bold text-ink-600 dark:text-ink-200">
+        EPC: ...{current.epc?.slice(-6) || '---'}
+      </span>
     </div>
   );
 }
@@ -225,7 +251,7 @@ function CajaHistory({ history }) {
                   </span>
                 </div>
                 <div className="mt-0.5 text-[11px] text-ink-700 dark:text-ink-100 font-medium truncate">
-                  Bahia {scan.bahiaActual} - Caja {scan.cajaDestino}
+                  Carga #{String(scan.loadNumber || 1).padStart(3, '0')} - Bahia {scan.bahiaActual} - Caja {scan.cajaDestino}
                 </div>
                 <div className="mt-0.5 text-[10px] text-ink-400 truncate">
                   {scan.tienda?.nombre || 'Sin tienda'}

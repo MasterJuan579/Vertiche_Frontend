@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 const SORTER_HISTORY_LIMIT = 24;
 const CAJA_HISTORY_LIMIT = 18;
@@ -10,22 +10,56 @@ export function useSorterRealtime() {
   const [sorterTotal, setSorterTotal] = useState(0);
   const [cajaCurrent, setCajaCurrent] = useState(null);
   const [cajaHistory, setCajaHistory] = useState([]);
+  const sorterLoadNumber = useRef(0);
+  const cajaLoadNumber = useRef(0);
+  const lastSorterScanId = useRef(null);
+  const lastCajaScanId = useRef(null);
+  const sorterScansByEpc = useRef(new Map());
+  const cajaScansByEpc = useRef(new Map());
 
   const processSorterScan = useCallback((payload) => {
     const prepack = normalizeSorterScan(payload);
-    if (!prepack) return;
+    if (!prepack || lastSorterScanId.current === prepack.scanId) return;
 
-    setSorterCurrent(prepack);
+    lastSorterScanId.current = prepack.scanId;
+    const epcKey = normalizeEpc(prepack.epc);
+    const isDuplicatePrepack = sorterScansByEpc.current.has(epcKey);
+
+    sorterLoadNumber.current += 1;
+    const numberedPrepack = {
+      ...prepack,
+      loadNumber: sorterLoadNumber.current,
+      isDuplicatePrepack,
+    };
+
+    if (!isDuplicatePrepack) {
+      sorterScansByEpc.current.set(epcKey, numberedPrepack);
+    }
+    setSorterCurrent(numberedPrepack);
     setSorterTotal((total) => total + 1);
-    setSorterHistory((history) => prependUnique(history, prepack, SORTER_HISTORY_LIMIT));
+    setSorterHistory((history) => prependUnique(history, numberedPrepack, SORTER_HISTORY_LIMIT));
   }, []);
 
   const processCajaScan = useCallback((payload) => {
     const prepack = normalizeCajaScan(payload);
-    if (!prepack) return;
+    if (!prepack || lastCajaScanId.current === prepack.scanId) return;
 
-    setCajaCurrent(prepack);
-    setCajaHistory((history) => prependUnique(history, prepack, CAJA_HISTORY_LIMIT));
+    lastCajaScanId.current = prepack.scanId;
+    const epcKey = normalizeEpc(prepack.epc);
+    const isDuplicatePrepack = cajaScansByEpc.current.has(epcKey);
+
+    cajaLoadNumber.current += 1;
+    const numberedPrepack = {
+      ...prepack,
+      loadNumber: cajaLoadNumber.current,
+      isDuplicatePrepack,
+    };
+
+    if (!isDuplicatePrepack) {
+      cajaScansByEpc.current.set(epcKey, numberedPrepack);
+    }
+    setCajaCurrent(numberedPrepack);
+    setCajaHistory((history) => prependUnique(history, numberedPrepack, CAJA_HISTORY_LIMIT));
   }, []);
 
   useEffect(() => {
@@ -78,6 +112,10 @@ export function useSorterRealtime() {
       history: cajaHistory,
     },
   };
+}
+
+function normalizeEpc(epc) {
+  return String(epc || '').trim().toUpperCase();
 }
 
 function prependUnique(history, scan, limit) {
