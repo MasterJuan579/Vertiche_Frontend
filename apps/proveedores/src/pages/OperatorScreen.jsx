@@ -72,9 +72,17 @@ export function OperatorScreen() {
   const [flow, setFlow]             = useState(F_IDLE);
   const [scanInput, setScanInput]   = useState('');
   const [scanError, setScanError]   = useState(null);
+  // `scanData` se actualiza con cada lectura — sirve para los banners de PASA
+  // y BLOQUEADO que muestran info del ÚLTIMO evento recibido.
   const [scanData, setScanData]     = useState(null);
 
   // ─── Captura de inspección ─────────────────────────
+  // `inspeccionActual` es un snapshot CONGELADO del prepack que el inspector
+  // está revisando. Se fija al transicionar a F_INSPECT y NO se modifica con
+  // eventos posteriores — así evitamos el race condition cuando llegan dos
+  // qa-escaneo en el mismo tick de React (el batching haría que ambos vieran
+  // flow=F_IDLE y sobrescribieran al primero).
+  const [inspeccionActual, setInspeccionActual] = useState(null);
   const [defectTypes, setDefectTypes] = useState([]);
   const [otherText, setOtherText]     = useState('');
   const [notes, setNotes]             = useState('');
