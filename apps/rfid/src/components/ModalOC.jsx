@@ -48,16 +48,26 @@ export function ModalOC({ oc, etapaOrigen = null, onClose, onVerHistorial }) {
 
   // ─── Derived data ────────────────────────────────────────────────────
   const tags = oc.tags || [];
+  const tagsPorEtapa = oc.tagsPorEtapa || {};
   const etapaLogs = oc.etapa_logs || [];
   const totalEsperados = oc.total_esperados || tags.length;
-  const totalRecibidos = oc.total_recibidos || tags.length;
-  const faltantes = oc.faltantes || 0;
-  const etapasActuales = ETAPAS_ORDEN.filter((e) => tags.some((t) => t.etapa_actual === e));
+  const totalRecibidos = oc.total_recibidos != null ? oc.total_recibidos : tags.length;
+  const faltantes = oc.faltantes != null ? oc.faltantes : Math.max(0, totalEsperados - totalRecibidos);
+  // Preferimos `etapasActivas` que ya viene calculado con el mapeo del Gantt.
+  // `tags.some(t => t.etapa_actual === e)` rompía porque `t.etapa_actual`
+  // trae los estados del backend (REGISTRADO, EN_QA, EN_AUDITORIA, ...) y
+  // las etapas del Gantt son otras (PREREGISTRO, QA, AUDITORIA, ...).
+  const etapasActuales = (oc.etapasActivas && oc.etapasActivas.length > 0)
+    ? oc.etapasActivas.filter((e) => ETAPAS_ORDEN.includes(e))
+    : ETAPAS_ORDEN.filter((e) => (tagsPorEtapa[e]?.length || 0) > 0);
   const fallidos = tags.filter((t) => t.qa_fallido);
   const tieneErr = fallidos.length > 0 || etapaLogs.some((l) => l.tiene_anomalia);
 
+  // Cuando se abre desde una celda del Gantt, filtramos por la etapa del
+  // GANTT (no por la cruda del backend). Si la OC trae tagsPorEtapa, lo
+  // usamos directo; si no, fallback a filtrar tags raw para no crashear.
   const tagsFiltrados = etapaOrigen
-    ? tags.filter((t) => t.etapa_actual === etapaOrigen)
+    ? (tagsPorEtapa[etapaOrigen] || tags.filter((t) => t.etapa_actual === etapaOrigen))
     : tags;
 
   // Sort: errors first, then anomalies, then the rest.
@@ -121,7 +131,8 @@ export function ModalOC({ oc, etapaOrigen = null, onClose, onVerHistorial }) {
         {etapaOrigen && (
           <OrigenMetrics
             etapaOrigen={etapaOrigen}
-            tags={tags}
+            tagsEnEtapa={tagsFiltrados}
+            tagsTotal={tags}
             totalEsperados={totalEsperados}
           />
         )}
@@ -360,11 +371,14 @@ const METRICAS_POR_ETAPA = {
   ],
 };
 
-function OrigenMetrics({ etapaOrigen, tags, totalEsperados }) {
+function OrigenMetrics({ etapaOrigen, tagsEnEtapa, tagsTotal, totalEsperados }) {
   const c = ETAPA_COLORS[etapaOrigen] || '#6366F1';
-  const te = tags.filter((t) => t.etapa_actual === etapaOrigen);
+  // `tagsEnEtapa` viene ya filtrado por el padre usando tagsPorEtapa
+  // (mapeo del Gantt). Antes filtrábamos aquí con `t.etapa_actual === etapaOrigen`
+  // pero eso comparaba estados del backend contra ids del Gantt → siempre 0.
+  const te = tagsEnEtapa || [];
   const n = te.length;
-  const tot = tags.length;
+  const tot = (tagsTotal || []).length;
   const err = te.filter((t) => t.qa_fallido).length;
   const ok = n - err;
   const pct = tot > 0 ? Math.round((n / tot) * 100) : 0;
@@ -665,7 +679,9 @@ function PrepackRow({ tag, onClick }) {
   const colUnicos = [...new Set(prendas.map((p) => p.color))];
   const tallUnicas = [...new Set(prendas.map((p) => p.talla))];
   const codigoCorto = tag.epc && tag.epc.length > 6 ? `···${tag.epc.slice(-6)}` : tag.epc;
-  const entregado = ['ENVIO', 'COMPLETADO'].includes(tag.etapa_actual);
+  // El backend usa 'ENVIADO' como estado terminal (no 'ENVIO' que es el id
+  // del Gantt visual). Aceptamos ambos por compatibilidad.
+  const entregado = ['ENVIADO', 'ENVIO', 'COMPLETADO'].includes(tag.etapa_actual);
   const etapaColor = ETAPA_COLORS[tag.etapa_actual] || '#94A3B8';
 
   const rowBgCls = tieneErr
