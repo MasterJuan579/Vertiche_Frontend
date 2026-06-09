@@ -17,7 +17,7 @@ export function isActiveAnomaly(anomalia) {
   return !(anomalia?.resuelto === true || anomalia?.resuelto === 'true');
 }
 
-export function getCumplimiento(pedidos) {
+export function getCumplimiento(pedidos, tags = []) {
   if (pedidos.length > 0) {
     const sample = pedidos[0];
     if (sample.total_esperados === undefined && sample.totalEsperados === undefined)
@@ -30,10 +30,18 @@ export function getCumplimiento(pedidos) {
     (sum, pedido) => sum + toNumber(pedido.total_esperados ?? pedido.totalEsperados),
     0,
   );
-  const totalRecibidos = pedidos.reduce(
-    (sum, pedido) => sum + toNumber(pedido.total_recibidos ?? pedido.totalRecibidos),
-    0,
-  );
+  const totalRecibidos = pedidos.reduce((sum, pedido) => {
+    const dbRecibidos = toNumber(pedido.total_recibidos ?? pedido.totalRecibidos);
+    if (dbRecibidos > 0) return sum + dbRecibidos;
+
+    // Fallback dinámico: contar tags reales asociados a este pedido que ya han sido vinculados (no son PENDIENTE-...)
+    const realTagsCount = tags.filter(
+      (t) =>
+        String(t.pedido_id ?? t.pedidoId) === String(pedido.pedido_id ?? pedido.pedidoId) &&
+        !String(t.epc ?? '').startsWith('PENDIENTE'),
+    ).length;
+    return sum + realTagsCount;
+  }, 0);
 
   return {
     totalEsperados,
