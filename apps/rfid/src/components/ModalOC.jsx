@@ -201,12 +201,12 @@ export function ModalOC({ oc, etapaOrigen = null, onClose, onVerHistorial }) {
                   }
                 >
                   <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-rfid dark:text-blue-300 mb-0.5">
-                    Bahía {b.n}
+                    Bahía B-{String(b.n).padStart(2, '0')}
                   </div>
                   <div className="text-lg font-bold text-ink-700 dark:text-ink-100 leading-none">
                     {b.total}
                   </div>
-                  <div className="text-[9px] text-ink-400 mt-0.5">prepacks</div>
+                  <div className="text-[9px] text-ink-400 mt-0.5">prepacks aquí</div>
                 </div>
               ))}
             </div>
@@ -353,33 +353,33 @@ const METRICAS_POR_ETAPA = {
     { l: 'Recibido',     k: 'pct', d: 'del total esperado' },
   ],
   QA: [
-    { l: 'En QA',        k: 'n',     d: 'prepacks revisados' },
+    { l: 'Revisados',    k: 'n',     d: 'pasaron por QA' },
     { l: 'Aprobados',    k: 'ok',    d: 'pasaron calidad' },
     { l: 'Calificación', k: 'pctOk', d: 'del proveedor' },
   ],
   REGISTRO: [
     { l: 'Registrados',  k: 'n',   d: 'en sistema' },
     { l: 'Total OC',     k: 'tot', d: 'prepacks totales' },
-    { l: 'Avance',       k: 'pct', d: 'procesado' },
+    { l: 'Avance',       k: 'pct', d: 'de esta OC' },
   ],
   SORTER: [
-    { l: 'En Sorter',    k: 'n',   d: 'clasificando' },
-    { l: 'Total',        k: 'tot', d: 'prepacks OC' },
-    { l: 'Procesado',    k: 'pct', d: 'del cargamento' },
+    { l: 'Clasificados', k: 'n',   d: 'pasaron por sorter' },
+    { l: 'Total OC',     k: 'tot', d: 'prepacks totales' },
+    { l: 'Procesado',    k: 'pct', d: 'de la OC' },
   ],
   BAHIA: [
-    { l: 'En bahías',    k: 'n',   d: 'distribuidos' },
-    { l: 'Total OC',     k: 'tot', d: 'prepacks' },
-    { l: 'Distribuido',  k: 'pct', d: 'del total' },
+    { l: 'Distribuidos', k: 'n',   d: 'colocados en bahía' },
+    { l: 'Total OC',     k: 'tot', d: 'prepacks totales' },
+    { l: 'Distribuido',  k: 'pct', d: 'de la OC' },
   ],
   AUDITORIA: [
-    { l: 'Auditados',    k: 'n',     d: 'prepacks' },
-    { l: 'Aprobados',    k: 'ok',    d: 'pasaron' },
-    { l: 'Aprobación',   k: 'pctOk', d: 'de calidad' },
+    { l: 'Auditados',    k: 'n',     d: 'verificados' },
+    { l: 'Aprobados',    k: 'ok',    d: 'sin observación' },
+    { l: 'Aprobación',   k: 'pctOk', d: 'sin observación' },
   ],
   ENVIO: [
-    { l: 'Enviados',     k: 'n',   d: 'prepacks' },
-    { l: 'Total OC',     k: 'tot', d: 'prepacks' },
+    { l: 'Enviados',     k: 'n',   d: 'salieron del CEDIS' },
+    { l: 'Total OC',     k: 'tot', d: 'prepacks totales' },
     { l: 'Completado',   k: 'pct', d: 'del pedido' },
   ],
 };

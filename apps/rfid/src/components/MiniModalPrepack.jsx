@@ -49,23 +49,16 @@ export function MiniModalPrepack({ tag, onClose, onVerHistorial }) {
 
         {/* ───── Header ───── */}
         <div className="flex items-center gap-4 px-5 py-4 border-b border-ink-100 dark:border-ink-600">
-          {/* Garment preview */}
+          {/* Color preview */}
           <div
-            className="w-14 h-14 rounded-lg shrink-0 flex items-center justify-center shadow-card"
+            className="w-14 h-14 rounded-lg shrink-0 shadow-card"
             style={{
               background: cCSS,
               border: esC ? '2px solid #E2E8F0' : 'none',
             }}
-          >
-            <svg viewBox="0 0 32 32" width={36} height={36} fill="none">
-              <path
-                d="M10 4L5 10L9 12L9 26L23 26L23 12L27 10L22 4C21 6 18.5 7.5 16 7.5C13.5 7.5 11 6 10 4Z"
-                fill={esC ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.25)'}
-                stroke={esC ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.5)'}
-                strokeWidth={1}
-              />
-            </svg>
-          </div>
+            title={colorPrincipal || '—'}
+            aria-label={`Color del prepack: ${colorPrincipal || 'sin color'}`}
+          />
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
