@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ETAPAS_FLUJO, ETAPA_COLORS, parseBahiaNumero } from '../data/etapas.js';
+import { ETAPAS_FLUJO, ETAPA_COLORS, parseBahiaNumero, ETAPA_DB_TO_GANTT as ETAPA_DB_TO_GANTT_SHARED } from '../data/etapas.js';
 import { ModalOC } from '../components/ModalOC.jsx';
 import { ModalResumenOC } from '../components/ModalResumenOC.jsx';
 import { realApi } from '../services/realApi.js';
@@ -17,24 +17,10 @@ import { onSocket } from '../services/socketClient.js';
 const ZONA_LABELS = { BAHIA: 'Bahías', AUDITORIA: 'Auditoría', ENVIO: 'Envío' };
 const ZONA_ACCENT = { BAHIA: '#0891B2', AUDITORIA: '#DB2777', ENVIO: '#16A34A' };
 
-/**
- * Mapeo del enum DB `Tag.etapa_actual` a la etapa visual del Gantt.
- * El esquema MySQL guarda EstadoPrepack:
- *   REGISTRADO, EN_QA, APROBADO, EN_SORTING, EN_CAJA, EN_AUDITORIA, RECHAZADO, ENVIADO.
- * Hay un lector RFID físico en cada etapa, así que cada estado tiene su columna.
- * El Gantt visual usa: PREREGISTRO, QA, REGISTRO, SORTER, BAHIA, AUDITORIA, ENVIO.
- * Un tag aparece SOLO en la etapa donde está actualmente, no en las anteriores.
- */
-const ETAPA_DB_TO_GANTT = {
-  REGISTRADO:   'PREREGISTRO',
-  EN_QA:        'QA',
-  APROBADO:     'REGISTRO',
-  EN_SORTING:   'SORTER',
-  EN_CAJA:      'BAHIA',
-  EN_AUDITORIA: 'AUDITORIA',
-  RECHAZADO:    'QA',
-  ENVIADO:      'ENVIO',
-};
+// Mapeo del enum DB `Tag.etapa_actual` al id del Gantt; vive en
+// `data/etapas.js` para que el modal lo reutilice. Re-export local
+// para no romper referencias internas del archivo.
+const ETAPA_DB_TO_GANTT = ETAPA_DB_TO_GANTT_SHARED;
 
 export function FlujoCEDIS() {
   const [pausado, setPausado] = useState(false);
@@ -291,8 +277,23 @@ function buildOcsView(ordenes, tags, anomalias) {
   }
 
   const ocs = ordenes.map((oc) => {
-    const tagsDeOC = tags.filter((t) => t.orden_id === oc.orden_id);
-    const tagsPorEtapa = agruparTagsPorEtapaGantt(tagsDeOC);
+    // Preferimos los tagsPorEtapa que ya viene poblado por el backend (via
+    // include Palet -> Tag). Si el endpoint no devolvio tags (ej. asociacion
+    // rota o version antigua del backend), caemos al filtro local por
+    // orden_id como fallback. Esto evita el bug donde "Recibidos: 0" cuando
+    // el backend si sabe que hay prepacks.
+    const backendPobloTags = oc.tagsPorEtapa
+      && typeof oc.tagsPorEtapa === 'object'
+      && Object.values(oc.tagsPorEtapa).some((v) => Array.isArray(v) && v.length > 0);
+    const tagsPorEtapa = backendPobloTags
+      ? oc.tagsPorEtapa
+      : agruparTagsPorEtapaGantt(tags.filter((t) => t.orden_id === oc.orden_id));
+    // Reconstruimos `tagsDeOC` desde la fuente que usamos arriba para que
+    // los conteos (faltantes, totalRecibidos) sean consistentes con lo
+    // que pinta el Gantt.
+    const tagsDeOC = backendPobloTags
+      ? Object.values(tagsPorEtapa).flat()
+      : tags.filter((t) => t.orden_id === oc.orden_id);
     const etapasConTags = ETAPAS_FLUJO.map((e, i) => ({ id: e.id, idx: i }))
       .filter(({ id }) => (tagsPorEtapa[id]?.length ?? 0) > 0);
     const idxMin = etapasConTags.length ? etapasConTags[0].idx : 0;

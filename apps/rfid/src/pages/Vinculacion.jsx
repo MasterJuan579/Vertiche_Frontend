@@ -27,6 +27,14 @@ export function Vinculacion() {
   const [error, setError] = useState(null);
   const [modalNuevaOC, setModalNuevaOC] = useState(false);
   const [modalAsignar, setModalAsignar] = useState(null);
+  // modalAgrupador es { orden_id, nombre_oc, epc_placeholder } cuando hay
+  // que asignar el chip maestro de una OC creada con flag agruparOC.
+  const [modalAgrupador, setModalAgrupador] = useState(null);
+  // agrupadorInfo refleja el estado del chip maestro de la OC seleccionada:
+  //   null  → aún no se carga.
+  //   { agrupador: null, total_prepacks }   → la OC no tiene agrupador.
+  //   { agrupador: {epc, ...}, total_prepacks } → existe (placeholder o real).
+  const [agrupadorInfo, setAgrupadorInfo] = useState(null);
   const [mensaje, setMensaje] = useState(null);
 
   useEffect(() => {
@@ -34,15 +42,31 @@ export function Vinculacion() {
   }, []);
 
   useEffect(() => {
-    if (ordenSel) cargarPrepacks(ordenSel);
-    else setPrepacks(null);
+    if (ordenSel) {
+      cargarPrepacks(ordenSel);
+      cargarAgrupador(ordenSel);
+    } else {
+      setPrepacks(null);
+      setAgrupadorInfo(null);
+    }
   }, [ordenSel]);
 
   // Refresca el listado en vivo cuando se asigna un EPC desde otro lado.
   useEffect(() => {
     if (!ordenSel) return;
-    const off = onSocket('prepack-asignado', () => cargarPrepacks(ordenSel));
-    return off;
+    const off1 = onSocket('prepack-asignado', () => cargarPrepacks(ordenSel));
+    // Cuando un chip maestro avanza, los Tag de la OC cambian de etapa.
+    // Refrescamos prepacks para que el grid los muestre actualizados.
+    const off2 = onSocket('lectura-agrupador', (ev) => {
+      if (ev?.orden_id === ordenSel) cargarPrepacks(ordenSel);
+    });
+    const off3 = onSocket('agrupador-asignado', (ev) => {
+      if (ev?.orden_id === ordenSel) cargarAgrupador(ordenSel);
+    });
+    const off4 = onSocket('agrupador-eliminado', (ev) => {
+      if (ev?.orden_id === ordenSel) cargarAgrupador(ordenSel);
+    });
+    return () => { off1(); off2(); off3(); off4(); };
   }, [ordenSel]);
 
   async function cargarCatalogos() {
@@ -77,6 +101,64 @@ export function Vinculacion() {
       setPrepacks(null);
     }
   }
+
+  async function cargarAgrupador(orden_id) {
+    try {
+      const data = await realApi.getAgrupador(orden_id);
+      setAgrupadorInfo(data);
+    } catch (err) {
+      console.error('No se pudo cargar el agrupador:', err);
+      setAgrupadorInfo({ agrupador: null, total_prepacks: 0 });
+    }
+  }
+
+  // Activa el chip maestro en una OC ya creada. Si la OC tiene tags fuera
+  // de REGISTRADO, el backend devuelve 400 y mostramos el mensaje.
+  // Despues de crearlo, abrimos el modal para asignar el EPC fisico.
+  const crearAgrupadorParaOC = async () => {
+    if (!ordenSel) return;
+    try {
+      const res = await realApi.crearAgrupador(ordenSel);
+      const ocActual = ordenes.find((o) => o.orden_id === ordenSel);
+      setAgrupadorInfo({
+        agrupador: res.agrupador,
+        total_prepacks: prepacks?.total || 0,
+      });
+      setModalAgrupador({
+        orden_id: ordenSel,
+        nombre_oc: ocActual?.nombre_producto || ordenSel,
+        epc_placeholder: res.agrupador.epc,
+      });
+    } catch (err) {
+      setMensaje({ tipo: 'error', texto: err.message || 'No se pudo crear el chip maestro.' });
+      setTimeout(() => setMensaje(null), 5000);
+    }
+  };
+
+  // Abre el modal para asignar el EPC fisico cuando ya existe un placeholder.
+  const reabrirAsignarAgrupador = () => {
+    if (!ordenSel || !agrupadorInfo?.agrupador) return;
+    const ocActual = ordenes.find((o) => o.orden_id === ordenSel);
+    setModalAgrupador({
+      orden_id: ordenSel,
+      nombre_oc: ocActual?.nombre_producto || ordenSel,
+      epc_placeholder: agrupadorInfo.agrupador.epc,
+    });
+  };
+
+  const eliminarAgrupador = async () => {
+    if (!ordenSel) return;
+    if (!confirm('¿Eliminar el chip maestro de esta OC? Los chips individuales por prepack siguen funcionando.')) return;
+    try {
+      await realApi.deleteAgrupador(ordenSel);
+      setAgrupadorInfo({ agrupador: null, total_prepacks: prepacks?.total || 0 });
+      setMensaje({ tipo: 'exito', texto: 'Chip maestro eliminado.' });
+      setTimeout(() => setMensaje(null), 4000);
+    } catch (err) {
+      setMensaje({ tipo: 'error', texto: err.message || 'No se pudo eliminar el chip maestro.' });
+      setTimeout(() => setMensaje(null), 5000);
+    }
+  };
 
   const onPrepackClick = (prepack) => {
     setModalAsignar({ prepack });
@@ -185,6 +267,17 @@ export function Vinculacion() {
               </div>
             )}
 
+            {/* Chip maestro (siempre visible cuando hay OC activa) */}
+            {ocActiva && (
+              <ChipMaestroSection
+                info={agrupadorInfo}
+                totalPrepacks={prepacks?.total || 0}
+                onCrear={crearAgrupadorParaOC}
+                onReabrir={reabrirAsignarAgrupador}
+                onEliminar={eliminarAgrupador}
+              />
+            )}
+
             <button
               type="button"
               onClick={() => setModalNuevaOC(true)}
@@ -258,12 +351,23 @@ export function Vinculacion() {
           proveedores={proveedores}
           tiendas={tiendas}
           onClose={() => setModalNuevaOC(false)}
-          onCreada={async ({ ordenCompra }) => {
+          onCreada={async ({ ordenCompra, agrupador }) => {
             await cargarCatalogos();
             setOrdenSel(ordenCompra.orden_id);
             setModalNuevaOC(false);
             setMensaje({ tipo: 'exito', texto: `OC ${ordenCompra.orden_id} creada con ${ordenCompra.total_esperados} prepacks pendientes.` });
             setTimeout(() => setMensaje(null), 5000);
+            // Si la OC se creo con flag agruparOC, abrimos el modal para
+            // asignar el chip maestro inmediatamente. El supervisor puede
+            // cerrarlo y asignarlo despues; el agrupador queda con
+            // placeholder GRP-PENDIENTE-* hasta que se lea un chip fisico.
+            if (agrupador) {
+              setModalAgrupador({
+                orden_id: ordenCompra.orden_id,
+                nombre_oc: ordenCompra.nombre_producto,
+                epc_placeholder: agrupador.epc,
+              });
+            }
           }}
         />
       )}
@@ -273,6 +377,31 @@ export function Vinculacion() {
           prepack={modalAsignar.prepack}
           onClose={() => setModalAsignar(null)}
           onAsignar={asignarEPC}
+        />
+      )}
+
+      {modalAgrupador && (
+        <ModalAsignarAgrupador
+          info={modalAgrupador}
+          onClose={() => setModalAgrupador(null)}
+          onAsignar={async (epc_real) => {
+            try {
+              await realApi.asignarEpcAgrupador({
+                orden_id: modalAgrupador.orden_id,
+                epc_real: epc_real.trim(),
+              });
+              setMensaje({ tipo: 'exito', texto: `Chip maestro ${epc_real} asignado a la OC ${modalAgrupador.orden_id}.` });
+              setTimeout(() => setMensaje(null), 5000);
+              setModalAgrupador(null);
+              // Refrescamos el panel para que ya no muestre el placeholder.
+              if (ordenSel === modalAgrupador.orden_id) {
+                cargarAgrupador(ordenSel);
+              }
+            } catch (err) {
+              // El modal muestra el error sin cerrarse
+              throw err;
+            }
+          }}
         />
       )}
     </div>
@@ -538,6 +667,134 @@ function ProgressBar({ asignados, total }) {
 }
 
 // ============================================================
+// CHIP MAESTRO — panel que vive en la columna izquierda
+// ============================================================
+//
+// Tres estados posibles, segun lo que devuelve GET /rfid/orden/:id/agrupador:
+//   1. info === null            → aún cargando.
+//   2. info.agrupador === null  → la OC no tiene chip maestro; mostrar
+//      boton "+ Activar chip maestro para esta OC".
+//   3. info.agrupador.epc empieza con "GRP-PENDIENTE-"  → placeholder;
+//      el supervisor debe asignar el EPC real escaneando el chip fisico.
+//   4. info.agrupador.epc != placeholder → asignado, mostrar EPC y boton
+//      para quitar.
+function ChipMaestroSection({ info, totalPrepacks, onCrear, onReabrir, onEliminar }) {
+  // Mientras carga, ocupamos el espacio para que el layout no salte.
+  if (info === null) {
+    return (
+      <div className="pt-3 border-t border-ink-100 dark:border-ink-600">
+        <div className="font-mono text-[10px] font-bold uppercase tracking-industrial text-ink-400 mb-1.5">
+          Chip maestro (opcional)
+        </div>
+        <div className="text-[11px] text-ink-400 italic">Consultando...</div>
+      </div>
+    );
+  }
+
+  const ag = info.agrupador;
+  const sinChip = !ag;
+  const placeholder = ag && String(ag.epc || '').startsWith('GRP-PENDIENTE-');
+  const asignado = ag && !placeholder;
+
+  return (
+    <div className="pt-3 border-t border-ink-100 dark:border-ink-600">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="font-mono text-[10px] font-bold uppercase tracking-industrial text-ink-400">
+          Chip maestro (opcional)
+        </span>
+        {asignado && (
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-flow-bg text-flow border border-flow-ring/40 dark:bg-flow/20 dark:text-flow-ring dark:border-flow-ring/40">
+            ACTIVO
+          </span>
+        )}
+        {placeholder && (
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-attention-bg text-attention border border-attention-ring/40 dark:bg-attention/20 dark:text-attention-ring dark:border-attention-ring/40">
+            PENDIENTE
+          </span>
+        )}
+      </div>
+
+      {sinChip && (
+        <>
+          <div className="text-[11px] text-ink-500 dark:text-ink-300 mb-2 leading-snug">
+            Esta OC todavía no tiene chip maestro. Si quieres usar un solo RFID que avance los{' '}
+            {totalPrepacks || 'N'} prepacks en bloque, actívalo ahora.
+          </div>
+          <button
+            type="button"
+            onClick={onCrear}
+            className="w-full px-3 py-2 rounded-card text-[12px] font-semibold bg-rfid/10 text-rfid border border-rfid/30 hover:bg-rfid/20 dark:bg-rfid/20 dark:text-blue-300"
+          >
+            + Activar chip maestro para esta OC
+          </button>
+        </>
+      )}
+
+      {placeholder && (
+        <>
+          <div className="text-[11px] text-ink-500 dark:text-ink-300 mb-1 leading-snug">
+            El chip maestro está creado pero falta vincularlo a un EPC físico.
+          </div>
+          <div className="text-[10px] font-mono text-ink-400 mb-2 truncate" title={ag.epc}>
+            Placeholder: {ag.epc}
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onReabrir}
+              className="flex-1 px-3 py-2 rounded-card text-[12px] font-semibold bg-rfid text-white hover:bg-blue-700"
+            >
+              Asignar EPC del chip
+            </button>
+            <button
+              type="button"
+              onClick={onEliminar}
+              title="Quitar chip maestro"
+              className="px-2 py-2 rounded-card text-[12px] font-semibold bg-anomaly-bg text-anomaly border border-anomaly-ring/40 hover:bg-anomaly/20 dark:bg-anomaly/20 dark:text-anomaly-ring"
+            >
+              ×
+            </button>
+          </div>
+        </>
+      )}
+
+      {asignado && (
+        <>
+          <div className="text-[11px] text-ink-500 dark:text-ink-300 mb-1 leading-snug">
+            Cuando este chip se lea en cualquier etapa, los {totalPrepacks || info.total_prepacks || 'N'} prepacks avanzarán en bloque.
+          </div>
+          <div className="rounded-card border border-flow-ring/40 bg-flow-bg dark:bg-flow/10 dark:border-flow-ring/40 px-2.5 py-1.5 mb-2">
+            <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-flow dark:text-flow-ring mb-0.5">
+              EPC del chip maestro
+            </div>
+            <div className="text-[12px] font-mono text-ink-700 dark:text-ink-100 truncate" title={ag.epc}>
+              {ag.epc}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onReabrir}
+              className="flex-1 px-3 py-1.5 rounded-card text-[11px] font-semibold bg-ink-50 text-ink-500 border border-ink-200 hover:bg-ink-100 dark:bg-ink-700 dark:text-ink-300 dark:border-ink-500"
+            >
+              Reasignar
+            </button>
+            <button
+              type="button"
+              onClick={onEliminar}
+              className="px-2 py-1.5 rounded-card text-[11px] font-semibold bg-anomaly-bg text-anomaly border border-anomaly-ring/40 hover:bg-anomaly/20 dark:bg-anomaly/20 dark:text-anomaly-ring"
+              title="Quitar chip maestro"
+            >
+              Quitar
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // MODAL — ASIGNAR EPC
 // ============================================================
 
@@ -666,6 +923,124 @@ function ModalAsignarEPC({ prepack, onClose, onAsignar }) {
 }
 
 // ============================================================
+// MODAL — Asignar CHIP MAESTRO (OrdenAgrupador) — opcional por OC
+// ============================================================
+
+function ModalAsignarAgrupador({ info, onClose, onAsignar }) {
+  const [epc, setEpc] = useState('');
+  const [enviando, setEnviando] = useState(false);
+  const [error, setError] = useState(null);
+  const [autoDetectado, setAutoDetectado] = useState(false);
+
+  // Mismo patron que ModalAsignarEPC: escucha 'uid-detectado' del ESP32 y
+  // auto-rellena el campo. Asi el supervisor acerca el chip al lector y
+  // el modal lo captura solo.
+  useEffect(() => {
+    const off = onSocket('uid-detectado', (ev) => {
+      if (ev?.uid) {
+        setEpc(ev.uid);
+        setAutoDetectado(true);
+        setError(null);
+        setTimeout(() => setAutoDetectado(false), 1500);
+      }
+    });
+    return off;
+  }, []);
+
+  const handle = async () => {
+    setError(null);
+    if (!epc.trim()) {
+      setError('Captura el EPC del chip maestro (manual o con el lector ESP32).');
+      return;
+    }
+    setEnviando(true);
+    try {
+      await onAsignar(epc.trim());
+    } catch (err) {
+      setError(err.message || 'Error al asignar el chip maestro');
+    } finally {
+      setEnviando(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="w-[460px] max-w-[92vw] rounded-card border bg-white border-ink-100 shadow-xl dark:bg-ink-700 dark:border-ink-600" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-3 border-b border-ink-100 dark:border-ink-600">
+          <div className="font-display text-[14px] font-bold text-ink-700 dark:text-ink-100">
+            Asignar chip maestro de la OC
+          </div>
+          <button type="button" onClick={onClose} className="w-7 h-7 rounded flex items-center justify-center text-lg text-ink-400 hover:bg-ink-50 dark:hover:bg-ink-600">×</button>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          <div className="text-[12px] text-ink-500 dark:text-ink-300">
+            Vas a vincular un chip RFID maestro a toda esta OC. Cuando este chip se lea en cualquier
+            etapa (RECEPCIÓN, QA, REGISTRO, AUDITORÍA o SALIDA), todos los prepacks de la OC
+            avanzarán en bloque.
+          </div>
+
+          <div className="rounded-card border border-rfid/30 dark:border-rfid/40 bg-rfid/5 dark:bg-rfid/15 p-3">
+            <div className="font-mono text-[9px] font-bold uppercase tracking-industrial text-rfid dark:text-blue-300 mb-1">
+              Orden de compra
+            </div>
+            <div className="text-[13px] text-ink-700 dark:text-ink-100 font-semibold mb-0.5">
+              {info?.nombre_oc || '—'}
+            </div>
+            <div className="text-[10px] font-mono text-ink-400 truncate" title={info?.orden_id}>
+              {info?.orden_id}
+            </div>
+            <div className="text-[10px] font-mono text-ink-400 mt-1 truncate" title={info?.epc_placeholder}>
+              Placeholder: {info?.epc_placeholder}
+            </div>
+          </div>
+
+          {error && (
+            <div className="px-3 py-2 rounded-card border text-[13px] bg-anomaly-bg border-anomaly-ring/40 text-anomaly dark:bg-anomaly/20 dark:border-anomaly-ring/40 dark:text-anomaly-ring">
+              {error}
+            </div>
+          )}
+
+          <FormField label="EPC real del chip maestro" required>
+            <input
+              type="text"
+              placeholder="Acerca el chip al lector o escribe el EPC…"
+              value={epc}
+              onChange={(e) => { setEpc(e.target.value); setAutoDetectado(false); }}
+              onKeyDown={(e) => e.key === 'Enter' && handle()}
+              autoFocus
+              className={`w-full px-3 py-2 rounded-card text-[12px] font-mono outline-none border text-ink-700 placeholder:text-ink-400 focus:border-rfid dark:text-ink-100 transition-colors ${
+                autoDetectado
+                  ? 'bg-flow/10 border-flow-ring dark:bg-flow/20 dark:border-flow-ring'
+                  : 'bg-white border-ink-100 dark:bg-ink-700 dark:border-ink-500'
+              }`}
+            />
+          </FormField>
+
+          <div className="flex items-center gap-2 text-[10px] text-ink-400 dark:text-ink-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-flow-ring animate-pulse" />
+            <span>Esperando lectura del ESP32 (Lector 1 — Registro)…</span>
+          </div>
+
+          <div className="text-[10px] text-ink-400 dark:text-ink-300 pt-1">
+            Puedes cerrar y asignarlo después; los chips individuales por prepack siguen funcionando.
+          </div>
+        </div>
+
+        <div className="flex gap-2 px-5 py-3 border-t border-ink-100 dark:border-ink-600">
+          <button type="button" onClick={onClose} disabled={enviando} className="flex-1 px-3 py-2 rounded-card text-[13px] font-semibold bg-ink-50 text-ink-500 hover:bg-ink-100 disabled:opacity-50 dark:bg-ink-600 dark:text-ink-200 dark:hover:bg-ink-500">
+            Cerrar
+          </button>
+          <button type="button" onClick={handle} disabled={enviando} className="flex-1 px-3 py-2 rounded-card text-[13px] font-semibold bg-rfid text-white hover:bg-blue-700 disabled:opacity-50">
+            {enviando ? 'Asignando...' : 'Asignar chip maestro'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MODAL — NUEVA OC con renglones dinámicos
 // ============================================================
 
@@ -694,6 +1069,11 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
   const [prepacks, setPrepacks] = useState([nuevoPrepack()]);
   const [enviando, setEnviando] = useState(false);
   const [error, setError] = useState(null);
+  // Flag opcional: si esta marcado, ademas de los chips individuales por
+  // prepack, se crea UN chip maestro (OrdenAgrupador) para la OC entera.
+  // Cuando ese chip se lea en cualquier etapa, avanza todos los tags en
+  // bloque. Es OPCIONAL — coexiste con la asignacion individual.
+  const [agruparOC, setAgruparOC] = useState(false);
 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -773,6 +1153,7 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
         nombre_producto: form.nombre_producto.trim(),
         modelo: form.modelo.trim() || null,
         numero_palets: parseInt(form.numero_palets, 10),
+        agruparOC,
         // Cada prepack viaja con su tienda, copias y el desglose de líneas.
         detalles: prepacks.map((p) => ({
           tienda_id: p.tienda_id,
@@ -785,7 +1166,7 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
           })),
         })),
       });
-      await onCreada({ ordenCompra: res.ordenCompra });
+      await onCreada({ ordenCompra: res.ordenCompra, agrupador: res.agrupador });
     } catch (err) {
       setError(err.message || 'Error al crear la OC');
     } finally {
@@ -872,6 +1253,33 @@ function ModalNuevaOC({ proveedores, tiendas, onClose, onCreada }) {
             <div className="mt-3 px-3 py-2 rounded-card bg-rfid/5 border border-rfid/20 text-[12px] text-ink-700 dark:bg-rfid/15 dark:text-ink-100 dark:border-rfid/30">
               <strong>Total a crear:</strong> {totalPrepacks} prepack{totalPrepacks !== 1 ? 's' : ''} ({totalPiezas} pieza{totalPiezas !== 1 ? 's' : ''}) distribuidos en {form.numero_palets} palet{form.numero_palets > 1 ? 's' : ''}.
             </div>
+          </div>
+
+          {/* Chip maestro opcional ───────────────────────────────────── */}
+          <div className="border-t border-ink-100 dark:border-ink-600 pt-3">
+            <label className="flex items-start gap-3 cursor-pointer p-3 rounded-card bg-ink-50 hover:bg-rfid/5 border border-ink-100 dark:bg-ink-800 dark:hover:bg-rfid/10 dark:border-ink-600 transition-colors">
+              <input
+                type="checkbox"
+                checked={agruparOC}
+                onChange={(e) => setAgruparOC(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-rfid"
+              />
+              <div className="flex-1">
+                <div className="text-[13px] font-semibold text-ink-700 dark:text-ink-100">
+                  Vincular toda la OC a un solo chip RFID (opcional)
+                </div>
+                <div className="text-[11px] text-ink-500 dark:text-ink-300 mt-0.5">
+                  Crea un <strong>chip maestro</strong> adicional para esta OC. Cuando el ESP32 lo lea en cualquier etapa,
+                  los {totalPrepacks} prepacks avanzarán en bloque. Coexiste con los chips individuales:
+                  puedes asignar ambos o solo el que prefieras.
+                </div>
+                {agruparOC && (
+                  <div className="mt-2 text-[11px] text-rfid dark:text-blue-300 bg-rfid/5 dark:bg-rfid/15 px-2 py-1 rounded">
+                    Se abrirá un modal para asignar el chip maestro al confirmar la creación de la OC.
+                  </div>
+                )}
+              </div>
+            </label>
           </div>
         </div>
 
