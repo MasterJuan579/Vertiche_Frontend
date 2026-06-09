@@ -6,6 +6,7 @@ import {
   esColorClaro,
   parseBahiaNumero,
   formatBahiaId,
+  tagHaPasadoPorEtapa,
 } from '../data/etapas.js';
 import { formatHora, formatDur, durMinutes } from '../utils/format.js';
 import { consolidarHistorial } from '../utils/historial.js';
@@ -51,8 +52,12 @@ export function ModalOC({ oc, etapaOrigen = null, onClose, onVerHistorial }) {
   const tagsPorEtapa = oc.tagsPorEtapa || {};
   const etapaLogs = oc.etapa_logs || [];
   const totalEsperados = oc.total_esperados || tags.length;
-  const totalRecibidos = oc.total_recibidos != null ? oc.total_recibidos : tags.length;
-  const faltantes = oc.faltantes != null ? oc.faltantes : Math.max(0, totalEsperados - totalRecibidos);
+  // `total_recibidos` y `faltantes` del backend pueden venir
+  // desincronizados (vimos casos con esperados=5, recibidos=5, faltantes=5).
+  // Calculamos siempre desde el array real de tags para garantizar
+  // consistencia entre los 3 números mostrados.
+  const totalRecibidos = tags.length;
+  const faltantes = Math.max(0, totalEsperados - totalRecibidos);
   // Preferimos `etapasActivas` que ya viene calculado con el mapeo del Gantt.
   // `tags.some(t => t.etapa_actual === e)` rompía porque `t.etapa_actual`
   // trae los estados del backend (REGISTRADO, EN_QA, EN_AUDITORIA, ...) y
@@ -63,12 +68,19 @@ export function ModalOC({ oc, etapaOrigen = null, onClose, onVerHistorial }) {
   const fallidos = tags.filter((t) => t.qa_fallido);
   const tieneErr = fallidos.length > 0 || etapaLogs.some((l) => l.tiene_anomalia);
 
-  // Cuando se abre desde una celda del Gantt, filtramos por la etapa del
-  // GANTT (no por la cruda del backend). Si la OC trae tagsPorEtapa, lo
-  // usamos directo; si no, fallback a filtrar tags raw para no crashear.
-  const tagsFiltrados = etapaOrigen
+  // Cuando se abre desde una celda del Gantt:
+  //   - `tagsAhoraEnEtapa` son los tags que están AHORA en esa etapa.
+  //   - `tagsHanPasado` incluye también los que ya avanzaron a etapas
+  //     posteriores (más útil para "ver todo lo que pasó por aquí").
+  // La tabla de prepacks siempre lista TODOS los de la OC para que el
+  // supervisor pueda actuar sobre cualquiera, sin importar dónde estén.
+  const tagsAhoraEnEtapa = etapaOrigen
     ? (tagsPorEtapa[etapaOrigen] || tags.filter((t) => t.etapa_actual === etapaOrigen))
     : tags;
+  const tagsHanPasado = etapaOrigen
+    ? tags.filter((t) => tagHaPasadoPorEtapa(t, etapaOrigen))
+    : tags;
+  const tagsFiltrados = tags;
 
   // Sort: errors first, then anomalies, then the rest.
   const tagsSorted = [...tagsFiltrados].sort((a, b) => {
@@ -131,7 +143,8 @@ export function ModalOC({ oc, etapaOrigen = null, onClose, onVerHistorial }) {
         {etapaOrigen && (
           <OrigenMetrics
             etapaOrigen={etapaOrigen}
-            tagsEnEtapa={tagsFiltrados}
+            tagsAhoraAqui={tagsAhoraEnEtapa}
+            tagsHanPasado={tagsHanPasado}
             tagsTotal={tags}
             totalEsperados={totalEsperados}
           />
@@ -204,7 +217,7 @@ export function ModalOC({ oc, etapaOrigen = null, onClose, onVerHistorial }) {
         <SectionWrap
           label={
             etapaOrigen
-              ? `Prepacks en ${ETAPA_LABELS[etapaOrigen]} (${tagsFiltrados.length} de ${tags.length})`
+              ? `Prepacks (${tags.length}) — abriste desde ${ETAPA_LABELS[etapaOrigen]}`
               : `Prepacks (${tags.length})`
           }
           rightSlot={
@@ -371,19 +384,23 @@ const METRICAS_POR_ETAPA = {
   ],
 };
 
-function OrigenMetrics({ etapaOrigen, tagsEnEtapa, tagsTotal, totalEsperados }) {
+function OrigenMetrics({ etapaOrigen, tagsAhoraAqui, tagsHanPasado, tagsTotal, totalEsperados }) {
   const c = ETAPA_COLORS[etapaOrigen] || '#6366F1';
-  // `tagsEnEtapa` viene ya filtrado por el padre usando tagsPorEtapa
-  // (mapeo del Gantt). Antes filtrábamos aquí con `t.etapa_actual === etapaOrigen`
-  // pero eso comparaba estados del backend contra ids del Gantt → siempre 0.
-  const te = tagsEnEtapa || [];
-  const n = te.length;
+  // `tagsAhoraAqui`: tags actualmente en esta etapa.
+  // `tagsHanPasado`: tags que están aquí o ya avanzaron a etapas posteriores.
+  // El acumulado es lo más útil para "han pasado por aquí"; el actual sirve
+  // para saber qué está sin terminar de procesar.
+  const ahora = (tagsAhoraAqui || []).length;
+  const pasaron = (tagsHanPasado || []).length;
   const tot = (tagsTotal || []).length;
-  const err = te.filter((t) => t.qa_fallido).length;
-  const ok = n - err;
-  const pct = tot > 0 ? Math.round((n / tot) * 100) : 0;
-  const pctOk = n > 0 ? Math.round((ok / n) * 100) : 100;
-  const valores = { n, tot, esp: totalEsperados, ok, pct: `${pct}%`, pctOk: `${pctOk}%` };
+  const err = (tagsHanPasado || []).filter((t) => t.qa_fallido).length;
+  const ok = pasaron - err;
+  // El KPI principal ahora es el ACUMULADO (cuántos pasaron por aquí), no
+  // sólo los actuales — antes se veía 0% incluso si los 5 prepacks ya
+  // habían cruzado la etapa.
+  const pct = tot > 0 ? Math.round((pasaron / tot) * 100) : 0;
+  const pctOk = pasaron > 0 ? Math.round((ok / pasaron) * 100) : 100;
+  const valores = { n: pasaron, tot, esp: totalEsperados, ok, pct: `${pct}%`, pctOk: `${pctOk}%` };
   const mets = METRICAS_POR_ETAPA[etapaOrigen] || [];
 
   return (
@@ -392,10 +409,15 @@ function OrigenMetrics({ etapaOrigen, tagsEnEtapa, tagsTotal, totalEsperados }) 
       style={{ background: `${c}10`, borderLeftColor: c }}
     >
       <div
-        className="font-mono text-[9px] font-bold uppercase tracking-industrial mb-3"
+        className="font-mono text-[9px] font-bold uppercase tracking-industrial mb-3 flex items-center justify-between gap-3 flex-wrap"
         style={{ color: c }}
       >
-        {ETAPA_LABELS[etapaOrigen]} — métricas de esta etapa
+        <span>{ETAPA_LABELS[etapaOrigen]} — métricas de esta etapa</span>
+        <span className="font-mono text-[9px] font-bold tracking-industrial text-ink-400 normal-case">
+          Actualmente aquí: <strong style={{ color: c }}>{ahora}</strong>
+          {' · '}Han pasado: <strong style={{ color: c }}>{pasaron}</strong>
+          {' / '}{tot}
+        </span>
       </div>
       <div className="grid grid-cols-3 gap-2.5">
         {mets.map((m, i) => (
