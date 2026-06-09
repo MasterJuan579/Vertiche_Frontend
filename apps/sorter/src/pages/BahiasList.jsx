@@ -1,24 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardBody } from '@vertiche/design-system';
-import { BAY_COLORS } from '../data/demoData.js';
+import { BAY_COLORS, BAY_COUNT } from '../data/demoData.js';
 import { listTiendas } from '../api/tiendas.js';
 import { listTags } from '../api/tags.js';
 
 /**
  * Bay directory for the sorter module. Backend-driven, consistent with BayScreen:
- *   GET /Tienda/listarTiendas → stores grouped by their assigned bay.
+ *   GET /rfid/bahia/tiendas → stores grouped by their assigned bay.
  *   GET /Tag/listarTags       → prepacks; counted per bay via tag.tienda_id.
  * Bays are derived from the data, not hardcoded.
  */
 
-// "BAHIA-3" / "Bahia 3" -> 3, clamped to 1-10. Same rule as BayScreen.
+// "BAHIA-2" / "Bahia 2" -> 2, clamped to the configured sorter bays.
 function parseBahia(s) {
   if (!s) return null;
   const m = String(s).match(/(\d+)\s*$/);
   if (!m) return null;
   const n = parseInt(m[1], 10);
-  return Number.isFinite(n) && n >= 1 && n <= 10 ? n : null;
+  return Number.isFinite(n) && n >= 1 && n <= BAY_COUNT ? n : null;
 }
 
 export function BahiasList() {
