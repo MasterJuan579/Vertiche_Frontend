@@ -61,14 +61,32 @@ export function getEstadoOperativo({ anomalias, eventos }) {
 }
 
 export function getRecentEvents(eventos, minutes = 5) {
-  const now = Date.now();
+  if (eventos.length === 0) return [];
+
+  // Encontrar el timestamp del evento más reciente en el dataset
+  const timestamps = eventos
+    .map((e) => {
+      const rawDate = e.timestamp ?? e.fecha_hora ?? e.createdAt;
+      const date = rawDate ? new Date(rawDate) : null;
+      return date && !Number.isNaN(date.getTime()) ? date.getTime() : 0;
+    })
+    .filter((t) => t > 0);
+
+  // Si los eventos son históricos (por ejemplo, el más reciente tiene más de 12 horas)
+  // consideramos el evento más reciente como el "ahora" para que el dashboard muestre datos
+  const maxEventTime = timestamps.length > 0 ? Math.max(...timestamps) : 0;
+  const now = maxEventTime > 0 && Date.now() - maxEventTime > 12 * 60 * 60 * 1000
+    ? maxEventTime
+    : Date.now();
+
   const windowMs = minutes * 60 * 1000;
 
   return eventos.filter((evento) => {
     const rawDate = evento.timestamp ?? evento.fecha_hora ?? evento.createdAt;
     const date = rawDate ? new Date(rawDate) : null;
     if (!date || Number.isNaN(date.getTime())) return false;
-    return now - date.getTime() <= windowMs;
+    const diff = now - date.getTime();
+    return diff >= 0 && diff <= windowMs;
   });
 }
 
@@ -84,6 +102,13 @@ export function matchesAnyStage(entity, stage) {
     entity?.estado,
     entity?.ubicacion,
     entity?.zona,
+    entity?.bahia,
+    entity?.caja_id,
+    entity?.cajaId,
+    entity?.palet_id,
+    entity?.paletId,
+    entity?.lector_id,
+    entity?.lectorId,
   ].some((value) => normalizeStage(value).includes(expected));
 }
 
@@ -98,17 +123,19 @@ export function getStageItems(stageKey, data) {
         ? data.inspecciones
         : data.tags.filter((tag) => matchesAnyStage(tag, 'QA'));
     case 'registro':
-      return data.tags.filter((tag) => normalizeStage(tag.etapa_actual) === 'APROBADO');
+      return data.tags.filter(
+        (tag) => matchesAnyStage(tag, 'REGISTRO') || normalizeStage(tag.etapa_actual) === 'REGISTRADO',
+      );
     case 'sorter':
       return getRecentEvents(data.eventos, 5).filter((evento) => matchesAnyStage(evento, 'SORTER') || matchesAnyStage(evento, 'SORTING'));
     case 'bahia':
       return [
         ...data.eventos.filter((evento) => matchesAnyStage(evento, 'PACKING') || matchesAnyStage(evento, 'BAHIA')),
-        ...data.cajas.filter((caja) => caja.estado === 'ABIERTA' || caja.estado === 'EN_LLENADO'),
+        ...data.cajas.filter((caja) => caja.estado === 'ABIERTA' || caja.estado === 'EN_LLENADO' || caja.estado === 'SELLADA'),
       ];
     case 'auditoria':
       return data.tags.filter(
-        (tag) => matchesAnyStage(tag, 'AUDITORIA') || normalizeStage(tag.estado).includes('APROBADO'),
+        (tag) => matchesAnyStage(tag, 'AUDITORIA') || normalizeStage(tag.etapa_actual) === 'APROBADO' || normalizeStage(tag.estado).includes('APROBADO'),
       );
     case 'envio':
       return data.cajas.filter((caja) => matchesAnyStage(caja, 'ENVIO') || normalizeStage(caja.estado).includes('ENVIADA'));
