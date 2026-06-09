@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
-import { BAY_COLORS } from '../data/demoData.js';
+import { BAY_COLORS, BAY_COUNT } from '../data/demoData.js';
 import { listTiendas } from '../api/tiendas.js';
 import { listTagsCompletos } from '../api/tags.js';
 import { PrepackDetailPanel } from '../components/PrepackDetailPanel.jsx';
 
 /**
- * Per-bay view. Three "stations" (terminals) split the prepacks round-robin
- * so the team at each station can pull from their own queue. The right
+ * Per-bay view. Each of the three physical boxes belongs to one store, using
+ * Tienda.caja_asignada. The right
  * sidebar shows the selected prepack's full detail.
  *
  * Data: GET /Tag/listarTagsCompletos (each tag arrives with embedded tienda,
- * proveedor, palet and orden_compra) + GET /Tienda/listarTiendas to know
+ * proveedor, palet and orden_compra) + GET /rfid/bahia/tiendas to know
  * every store assigned to the bay even if it has zero prepacks yet.
  */
 
@@ -20,7 +20,7 @@ function parseBahia(s) {
   const m = String(s).match(/(\d+)\s*$/);
   if (!m) return null;
   const n = parseInt(m[1], 10);
-  return Number.isFinite(n) && n >= 1 && n <= 10 ? n : null;
+  return Number.isFinite(n) && n >= 1 && n <= BAY_COUNT ? n : null;
 }
 
 function enrichForPanel(tag, bayId) {
@@ -37,7 +37,7 @@ export function BayScreen() {
   const navigate = useNavigate();
 
   const bayId = parseInt(id, 10);
-  const validBay = Number.isFinite(bayId) && bayId >= 1 && bayId <= 10;
+  const validBay = Number.isFinite(bayId) && bayId >= 1 && bayId <= BAY_COUNT;
 
   const [tagsAll, setTagsAll] = useState([]);
   const [tiendasAll, setTiendasAll] = useState([]);
@@ -63,8 +63,21 @@ export function BayScreen() {
   }, [bayId, validBay]);
 
   const bayColor = BAY_COLORS[bayId] || '#6b7280';
+  const storeById = new Map(tiendasAll.map((store) => [store.tienda_id, store]));
   const allPrepacks = validBay
-    ? tagsAll.filter((t) => parseBahia(t.tienda?.bahia_asignada) === bayId)
+    ? tagsAll
+      .map((tag) => {
+        const configuredStore = storeById.get(tag.tienda_id);
+        if (!configuredStore) return null;
+        return {
+          ...tag,
+          tienda: {
+            ...(tag.tienda || {}),
+            ...configuredStore,
+          },
+        };
+      })
+      .filter((tag) => tag && parseBahia(tag.tienda?.bahia_asignada) === bayId)
     : [];
   const stores = validBay
     ? tiendasAll.filter((t) => parseBahia(t.bahia_asignada) === bayId)
@@ -86,10 +99,13 @@ export function BayScreen() {
     bayId
   );
 
-  // Round-robin into 3 stations.
+  // Each physical box shows only prepacks for its configured store.
   const stations = [1, 2, 3].map((termNum) => ({
     terminal: termNum,
-    prepacks: allPrepacks.filter((_, i) => i % 3 === termNum - 1),
+    store: stores.find((store) => Number(store.caja_asignada) === termNum) || null,
+    prepacks: allPrepacks.filter(
+      (tag) => Number(tag.tienda?.caja_asignada) === termNum
+    ),
   }));
 
   return (
@@ -160,6 +176,7 @@ export function BayScreen() {
             <StationColumn
               key={s.terminal}
               terminal={s.terminal}
+              store={s.store}
               prepacks={s.prepacks}
               bayColor={bayColor}
               selectedEpc={selectedEpc}
@@ -183,7 +200,7 @@ export function BayScreen() {
 // Sub-components
 // ──────────────────────────────────────────────────────────────────
 
-function StationColumn({ terminal, prepacks, bayColor, selectedEpc, onSelect, loading, hasError }) {
+function StationColumn({ terminal, store, prepacks, bayColor, selectedEpc, onSelect, loading, hasError }) {
   return (
     <div className={
       'flex flex-col overflow-hidden ' +
@@ -195,11 +212,16 @@ function StationColumn({ terminal, prepacks, bayColor, selectedEpc, onSelect, lo
           className="font-mono text-[11px] uppercase tracking-industrial font-bold"
           style={{ color: bayColor }}
         >
-          Estación {terminal}
+          Caja {terminal}
         </span>
-        <span className="ml-2 text-[10px] text-ink-400">
-          · {prepacks.length} prepack{prepacks.length !== 1 ? 's' : ''}
-        </span>
+        <div className="ml-2 min-w-0">
+          <div className="text-[10px] font-medium text-ink-600 dark:text-ink-200 truncate">
+            {store?.nombre || 'Sin tienda asignada'}
+          </div>
+          <div className="text-[9px] text-ink-400">
+            {prepacks.length} prepack{prepacks.length !== 1 ? 's' : ''}
+          </div>
+        </div>
       </div>
 
       {/* Prepack cards */}

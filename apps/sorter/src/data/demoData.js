@@ -60,6 +60,7 @@ function mkPrepack(epc, ocId, ocNombre, proveedor, tienda, prendas, opts = {}) {
 }
 
 export const CAJA_COUNT = 3;
+export const BAY_COUNT = 2;
 export const DEMO_BAY_ID = 1;
 
 /**

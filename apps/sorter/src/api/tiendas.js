@@ -1,7 +1,7 @@
 import { apiFetch } from './client.js';
 
 export function listTiendas() {
-  return apiFetch('/Tienda/listarTiendas');
+  return apiFetch('/rfid/bahia/tiendas');
 }
 
 export function getTienda(tiendaId) {

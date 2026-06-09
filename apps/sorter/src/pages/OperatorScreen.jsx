@@ -1,5 +1,5 @@
 import { Navigate, useParams } from 'react-router-dom';
-import { BAY_COLORS, CAJA_COUNT } from '../data/demoData.js';
+import { BAY_COLORS, BAY_COUNT, CAJA_COUNT } from '../data/demoData.js';
 import { IconScan, IconCheck, IconX } from '../components/Icons.jsx';
 
 export function OperatorScreen({ realtime }) {
@@ -119,7 +119,7 @@ function parseBayNumber(value) {
   const match = value.match(/BAHIA-(\d+)|\b(\d+)\b/i);
   if (!match) return null;
   const n = Number(match[1] || match[2]);
-  return Number.isFinite(n) ? n : null;
+  return Number.isFinite(n) && n >= 1 && n <= BAY_COUNT ? n : null;
 }
 
 function parseCajaNumber(value) {
