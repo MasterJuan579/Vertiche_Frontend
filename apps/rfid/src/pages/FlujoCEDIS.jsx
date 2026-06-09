@@ -277,8 +277,23 @@ function buildOcsView(ordenes, tags, anomalias) {
   }
 
   const ocs = ordenes.map((oc) => {
-    const tagsDeOC = tags.filter((t) => t.orden_id === oc.orden_id);
-    const tagsPorEtapa = agruparTagsPorEtapaGantt(tagsDeOC);
+    // Preferimos los tagsPorEtapa que ya viene poblado por el backend (via
+    // include Palet -> Tag). Si el endpoint no devolvio tags (ej. asociacion
+    // rota o version antigua del backend), caemos al filtro local por
+    // orden_id como fallback. Esto evita el bug donde "Recibidos: 0" cuando
+    // el backend si sabe que hay prepacks.
+    const backendPobloTags = oc.tagsPorEtapa
+      && typeof oc.tagsPorEtapa === 'object'
+      && Object.values(oc.tagsPorEtapa).some((v) => Array.isArray(v) && v.length > 0);
+    const tagsPorEtapa = backendPobloTags
+      ? oc.tagsPorEtapa
+      : agruparTagsPorEtapaGantt(tags.filter((t) => t.orden_id === oc.orden_id));
+    // Reconstruimos `tagsDeOC` desde la fuente que usamos arriba para que
+    // los conteos (faltantes, totalRecibidos) sean consistentes con lo
+    // que pinta el Gantt.
+    const tagsDeOC = backendPobloTags
+      ? Object.values(tagsPorEtapa).flat()
+      : tags.filter((t) => t.orden_id === oc.orden_id);
     const etapasConTags = ETAPAS_FLUJO.map((e, i) => ({ id: e.id, idx: i }))
       .filter(({ id }) => (tagsPorEtapa[id]?.length ?? 0) > 0);
     const idxMin = etapasConTags.length ? etapasConTags[0].idx : 0;
