@@ -173,19 +173,24 @@ function CurrentCaja({ current, bayColor }) {
 }
 
 function NewLoadBanner({ current, accentColor }) {
+  const isDuplicate = current.isDuplicatePrepack;
+  const bannerColor = isDuplicate ? '#ef4444' : accentColor;
+
   return (
     <div
       className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-5 py-2.5 rounded-card border-2 bg-white shadow-card dark:bg-ink-700"
-      style={{ borderColor: accentColor }}
+      style={{ borderColor: bannerColor }}
     >
       <span
         className="font-display text-base font-black uppercase tracking-industrial"
-        style={{ color: accentColor }}
+        style={{ color: bannerColor }}
       >
-        Nueva carga #{String(current.loadNumber || 1).padStart(3, '0')}
+        {isDuplicate
+          ? 'Ya escaneado - escanee otro'
+          : `Nueva carga #${String(current.loadNumber || 1).padStart(3, '0')}`}
       </span>
       <span className="font-mono text-xs font-bold text-ink-600 dark:text-ink-200">
-        Otro prepack: ...{current.epc?.slice(-6) || '---'}
+        EPC: ...{current.epc?.slice(-6) || '---'}
       </span>
     </div>
   );

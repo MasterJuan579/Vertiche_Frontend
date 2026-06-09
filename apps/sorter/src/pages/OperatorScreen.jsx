@@ -155,12 +155,16 @@ function WaitingState() {
 }
 
 function PickState({ current, shouldPick, selectedBay, cajaId, destinationColor }) {
+  const isDuplicate = current.isDuplicatePrepack;
+
   return (
     <div className="w-full flex flex-col items-center gap-4 sm:gap-5 animate-[fadeIn_.25s_ease]">
       <div
         className={
           'flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-5 py-2.5 rounded-card border-2 bg-white shadow-card dark:bg-ink-700 ' +
-          (shouldPick
+          (isDuplicate
+            ? 'border-anomaly dark:border-anomaly-ring'
+            : shouldPick
             ? 'border-flow dark:border-flow-ring'
             : 'border-ink-300 dark:border-ink-500')
         }
@@ -168,15 +172,19 @@ function PickState({ current, shouldPick, selectedBay, cajaId, destinationColor 
         <span
           className={
             'font-display text-base font-black uppercase tracking-industrial ' +
-            (shouldPick
+            (isDuplicate
+              ? 'text-anomaly dark:text-anomaly-ring'
+              : shouldPick
               ? 'text-flow dark:text-flow-ring'
               : 'text-ink-600 dark:text-ink-200')
           }
         >
-          Nueva carga #{String(current.loadNumber || 1).padStart(3, '0')}
+          {isDuplicate
+            ? 'Ya escaneado - escanee otro'
+            : `Nueva carga #${String(current.loadNumber || 1).padStart(3, '0')}`}
         </span>
         <span className="font-mono text-xs font-bold text-rfid dark:text-blue-300">
-          Otro prepack: ...{current.epc?.slice(-6) || '---'}
+          EPC: ...{current.epc?.slice(-6) || '---'}
         </span>
       </div>
 
