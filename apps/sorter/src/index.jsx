@@ -6,7 +6,7 @@ import { CajaSorterScreen } from './pages/CajaSorterScreen.jsx';
 import { BahiasList } from './pages/BahiasList.jsx';
 import { BayScreen } from './pages/BayScreen.jsx';
 import { OperatorScreen } from './pages/OperatorScreen.jsx';
-import { CAJA_COUNT } from './data/demoData.js';
+import { BAY_COUNT, CAJA_COUNT } from './data/demoData.js';
 import { useSorterRealtime } from './hooks/useSorterRealtime.js';
 
 const ACCENT = '#7C3AED';
@@ -28,7 +28,7 @@ export function SorterModule() {
     const match = location.pathname.match(/BAHIA-(\d+)/i);
     if (!match) return;
     const routeBay = Number(match[1]);
-    if (Number.isFinite(routeBay) && routeBay >= 1) {
+    if (Number.isFinite(routeBay) && routeBay >= 1 && routeBay <= BAY_COUNT) {
       setSelectedBay(routeBay);
     }
   }, [location.pathname]);
@@ -46,7 +46,7 @@ export function SorterModule() {
         key: 'bahia-selector',
         label: 'Bahia',
         value: selectedBay,
-        options: Array.from({ length: 10 }, (_, index) => ({
+        options: Array.from({ length: BAY_COUNT }, (_, index) => ({
           value: index + 1,
           label: `Bahia ${index + 1}`,
         })),
