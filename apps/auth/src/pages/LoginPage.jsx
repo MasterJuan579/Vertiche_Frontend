@@ -75,32 +75,38 @@ export function LoginPage() {
     setError('');
     setLoading(true);
 
-    const result = await signIn(email, password);
+    try {
+      const result = await signIn(email, password);
 
-    if (result.status === 'success') {
-      // Keep the spinner up; the effect above navigates once session lands.
-      return;
-    }
-    if (result.status === 'verify_email') {
-      // Email not verified — carry email + password (for re-auth) + access token
-      // to the verify page. No session is stored, so the user isn't logged in.
-      navigate('/verificar-email', {
-        state: { email, password, accessToken: result.tokens.accessToken },
-      });
-      return;
-    }
-    if (
-      result.status === 'challenge' &&
-      result.challengeName === 'NEW_PASSWORD_REQUIRED'
-    ) {
-      navigate('/nueva-contrasena', {
-        state: { email: result.email, session: result.session },
-      });
-      return;
-    }
+      if (result.status === 'success') {
+        // Keep the spinner up; the effect above navigates once session lands.
+        return;
+      }
+      if (result.status === 'verify_email') {
+        // Email not verified — carry email + password (for re-auth) + access token
+        // to the verify page. No session is stored, so the user isn't logged in.
+        navigate('/verificar-email', {
+          state: { email, password, accessToken: result.tokens.accessToken },
+        });
+        return;
+      }
+      if (
+        result.status === 'challenge' &&
+        result.challengeName === 'NEW_PASSWORD_REQUIRED'
+      ) {
+        navigate('/nueva-contrasena', {
+          state: { email: result.email, session: result.session },
+        });
+        return;
+      }
 
-    setLoading(false);
-    setError(errorMessage(result.code));
+      setLoading(false);
+      setError(errorMessage(result.code));
+    } catch (err) {
+      console.error('Login error:', err);
+      setLoading(false);
+      setError('Ocurrió un error inesperado al iniciar sesión. Intenta de nuevo.');
+    }
   }
 
   // Clear the error as soon as the user edits either field.
