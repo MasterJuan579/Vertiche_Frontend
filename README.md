@@ -288,6 +288,4 @@ El módulo `dashboard` ya consume la API real mediante `VITE_API_URL` y no usa `
 
 ---
 
-# Hola
-
 Hecho con cuidado por el equipo Vertiche · Tec de Monterrey CEM · 2026
