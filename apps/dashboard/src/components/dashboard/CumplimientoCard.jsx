@@ -5,7 +5,8 @@ import { ProgressBar } from '../common';
 
 export function CumplimientoCard() {
   const pedidos = useDashboardStore((state) => state.pedidos);
-  const cumplimiento = getCumplimiento(pedidos);
+  const tags = useDashboardStore((state) => state.tags);
+  const cumplimiento = getCumplimiento(pedidos, tags);
 
   return (
     <section className="bg-white dark:bg-ink-700 border border-ink-100 dark:border-ink-600 rounded-card min-h-[178px] p-5">
