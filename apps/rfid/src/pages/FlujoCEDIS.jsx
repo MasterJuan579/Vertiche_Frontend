@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ETAPAS_FLUJO, ETAPA_COLORS } from '../data/etapas.js';
+import { ETAPAS_FLUJO, ETAPA_COLORS, parseBahiaNumero } from '../data/etapas.js';
 import { ModalOC } from '../components/ModalOC.jsx';
 import { ModalResumenOC } from '../components/ModalResumenOC.jsx';
 import { realApi } from '../services/realApi.js';
@@ -103,10 +103,11 @@ export function FlujoCEDIS() {
   }
 
   function ocsEnBahiaYEtapa(numBahia, etapa) {
-    const bahiaId = `BAHIA-${numBahia}`;
+    // El backend devuelve `bahia_asignada` como `B-06`; comparamos por número
+    // para no acoplarnos al formato del string.
     return ocsView.filter((oc) =>
       (oc.tagsPorEtapa?.[etapa] || []).some(
-        (t) => t.tienda?.bahia_asignada === bahiaId
+        (t) => parseBahiaNumero(t.tienda?.bahia_asignada) === numBahia
       )
     );
   }

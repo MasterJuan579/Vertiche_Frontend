@@ -64,3 +64,26 @@ export function getColorCSS(c) {
 export function esColorClaro(c) {
   return ['blanco', 'white', 'beige', 'amarillo', 'yellow'].includes((c || '').toLowerCase());
 }
+
+// ============================================
+// HELPERS DE BAHÍA
+// ============================================
+// El backend ahora usa el formato `B-06` (cambio "bahia V2" del equipo) pero
+// históricamente algunas vistas guardaban `BAHIA-6`. Para no romper si llega
+// cualquiera de los dos, extraemos el número final del string.
+//
+//   parseBahiaNumero('B-06')   -> 6
+//   parseBahiaNumero('BAHIA-3') -> 3
+//   parseBahiaNumero(null)     -> null
+export function parseBahiaNumero(s) {
+  if (!s) return null;
+  const m = String(s).match(/(\d+)\s*$/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n >= 1 && n <= 10 ? n : null;
+}
+
+// Formato canónico actual para mostrar al usuario y comparar entre módulos.
+export function formatBahiaId(n) {
+  return `B-${String(n).padStart(2, '0')}`;
+}
