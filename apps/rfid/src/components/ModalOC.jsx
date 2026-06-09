@@ -4,6 +4,8 @@ import {
   ETAPA_LABELS,
   getColorCSS,
   esColorClaro,
+  parseBahiaNumero,
+  formatBahiaId,
 } from '../data/etapas.js';
 import { formatHora, formatDur, durMinutes } from '../utils/format.js';
 import { consolidarHistorial } from '../utils/historial.js';
@@ -80,11 +82,12 @@ export function ModalOC({ oc, etapaOrigen = null, onClose, onVerHistorial }) {
   const totColorAgr = (c) => todasPrendas.filter((x) => x.color === c).length;
   const totTallaAgr = (t) => todasPrendas.filter((x) => x.talla === t).length;
 
-  // Bays this OC distributes to
+  // Bays this OC distributes to.
+  // Backend devuelve `bahia_asignada` como `B-06`; comparamos por número.
   const bahiasOC = Array.from({ length: 10 }, (_, i) => {
-    const id = `BAHIA-${i + 1}`;
-    const enB = tags.filter((t) => t.tienda?.bahia_asignada === id);
-    return { n: i + 1, id, total: enB.length };
+    const n = i + 1;
+    const enB = tags.filter((t) => parseBahiaNumero(t.tienda?.bahia_asignada) === n);
+    return { n, id: formatBahiaId(n), total: enB.length };
   }).filter((b) => b.total > 0);
 
   // ─── Render ──────────────────────────────────────────────────────────
