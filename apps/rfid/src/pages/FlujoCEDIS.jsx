@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ETAPAS_FLUJO, ETAPA_COLORS } from '../data/etapas.js';
+import { ETAPAS_FLUJO, ETAPA_COLORS, parseBahiaNumero, ETAPA_DB_TO_GANTT as ETAPA_DB_TO_GANTT_SHARED } from '../data/etapas.js';
 import { ModalOC } from '../components/ModalOC.jsx';
 import { ModalResumenOC } from '../components/ModalResumenOC.jsx';
 import { realApi } from '../services/realApi.js';
@@ -17,24 +17,10 @@ import { onSocket } from '../services/socketClient.js';
 const ZONA_LABELS = { BAHIA: 'Bahías', AUDITORIA: 'Auditoría', ENVIO: 'Envío' };
 const ZONA_ACCENT = { BAHIA: '#0891B2', AUDITORIA: '#DB2777', ENVIO: '#16A34A' };
 
-/**
- * Mapeo del enum DB `Tag.etapa_actual` a la etapa visual del Gantt.
- * El esquema MySQL guarda EstadoPrepack:
- *   REGISTRADO, EN_QA, APROBADO, EN_SORTING, EN_CAJA, EN_AUDITORIA, RECHAZADO, ENVIADO.
- * Hay un lector RFID físico en cada etapa, así que cada estado tiene su columna.
- * El Gantt visual usa: PREREGISTRO, QA, REGISTRO, SORTER, BAHIA, AUDITORIA, ENVIO.
- * Un tag aparece SOLO en la etapa donde está actualmente, no en las anteriores.
- */
-const ETAPA_DB_TO_GANTT = {
-  REGISTRADO:   'PREREGISTRO',
-  EN_QA:        'QA',
-  APROBADO:     'REGISTRO',
-  EN_SORTING:   'SORTER',
-  EN_CAJA:      'BAHIA',
-  EN_AUDITORIA: 'AUDITORIA',
-  RECHAZADO:    'QA',
-  ENVIADO:      'ENVIO',
-};
+// Mapeo del enum DB `Tag.etapa_actual` al id del Gantt; vive en
+// `data/etapas.js` para que el modal lo reutilice. Re-export local
+// para no romper referencias internas del archivo.
+const ETAPA_DB_TO_GANTT = ETAPA_DB_TO_GANTT_SHARED;
 
 export function FlujoCEDIS() {
   const [pausado, setPausado] = useState(false);
@@ -103,10 +89,11 @@ export function FlujoCEDIS() {
   }
 
   function ocsEnBahiaYEtapa(numBahia, etapa) {
-    const bahiaId = `BAHIA-${numBahia}`;
+    // El backend devuelve `bahia_asignada` como `B-06`; comparamos por número
+    // para no acoplarnos al formato del string.
     return ocsView.filter((oc) =>
       (oc.tagsPorEtapa?.[etapa] || []).some(
-        (t) => t.tienda?.bahia_asignada === bahiaId
+        (t) => parseBahiaNumero(t.tienda?.bahia_asignada) === numBahia
       )
     );
   }
@@ -217,6 +204,8 @@ export function FlujoCEDIS() {
                       setPanelBahia({
                         key,
                         titulo: `${fila.label} — Bahía ${numBahia}`,
+                        numBahia,
+                        zona: fila.zona,
                         ocs: ocsB,
                       });
                     }
@@ -228,6 +217,8 @@ export function FlujoCEDIS() {
                 <PanelBahia
                   titulo={panelBahia.titulo}
                   ocs={panelBahia.ocs}
+                  numBahia={panelBahia.numBahia}
+                  zona={panelBahia.zona}
                   onClose={() => setPanelBahia(null)}
                   onAbrirOC={openModalDetalle}
                 />
@@ -286,8 +277,23 @@ function buildOcsView(ordenes, tags, anomalias) {
   }
 
   const ocs = ordenes.map((oc) => {
-    const tagsDeOC = tags.filter((t) => t.orden_id === oc.orden_id);
-    const tagsPorEtapa = agruparTagsPorEtapaGantt(tagsDeOC);
+    // Preferimos los tagsPorEtapa que ya viene poblado por el backend (via
+    // include Palet -> Tag). Si el endpoint no devolvio tags (ej. asociacion
+    // rota o version antigua del backend), caemos al filtro local por
+    // orden_id como fallback. Esto evita el bug donde "Recibidos: 0" cuando
+    // el backend si sabe que hay prepacks.
+    const backendPobloTags = oc.tagsPorEtapa
+      && typeof oc.tagsPorEtapa === 'object'
+      && Object.values(oc.tagsPorEtapa).some((v) => Array.isArray(v) && v.length > 0);
+    const tagsPorEtapa = backendPobloTags
+      ? oc.tagsPorEtapa
+      : agruparTagsPorEtapaGantt(tags.filter((t) => t.orden_id === oc.orden_id));
+    // Reconstruimos `tagsDeOC` desde la fuente que usamos arriba para que
+    // los conteos (faltantes, totalRecibidos) sean consistentes con lo
+    // que pinta el Gantt.
+    const tagsDeOC = backendPobloTags
+      ? Object.values(tagsPorEtapa).flat()
+      : tags.filter((t) => t.orden_id === oc.orden_id);
     const etapasConTags = ETAPAS_FLUJO.map((e, i) => ({ id: e.id, idx: i }))
       .filter(({ id }) => (tagsPorEtapa[id]?.length ?? 0) > 0);
     const idxMin = etapasConTags.length ? etapasConTags[0].idx : 0;
@@ -675,6 +681,25 @@ function BayRow({ fila, ocsEnBahiaYEtapa, activeKey, onClickCell }) {
           const key = `${fila.zona}-B${n}`;
           const activa = activeKey === key;
 
+          // Tiendas distintas que reciben prepacks en esta bahía en esta zona.
+          // Sirve para el tooltip y para que el usuario sepa "Bahía 5 → CDMX y Puebla".
+          const tiendasEnEstaBahia = (() => {
+            const map = new Map();
+            for (const oc of ocsB) {
+              const tagsZona = oc.tagsPorEtapa?.[fila.zona] || [];
+              for (const t of tagsZona) {
+                if (parseBahiaNumero(t.tienda?.bahia_asignada) !== n) continue;
+                const tid = t.tienda?.tienda_id || t.tienda_id;
+                if (!tid) continue;
+                if (!map.has(tid)) {
+                  map.set(tid, { tienda_id: tid, nombre: t.tienda?.nombre || tid, count: 0 });
+                }
+                map.get(tid).count += 1;
+              }
+            }
+            return Array.from(map.values()).sort((a, b) => b.count - a.count);
+          })();
+
           return (
             <BayCell
               key={n}
@@ -683,6 +708,7 @@ function BayRow({ fila, ocsEnBahiaYEtapa, activeKey, onClickCell }) {
               hasErr={err}
               activa={activa}
               ocs={ocsB}
+              tiendas={tiendasEnEstaBahia}
               shape={fila.zona === 'BAHIA' ? 'pill' : 'rect'}
               zonaColor={fila.color}
               onClick={() => onClickCell(n)}
@@ -694,13 +720,16 @@ function BayRow({ fila, ocsEnBahiaYEtapa, activeKey, onClickCell }) {
   );
 }
 
-function BayCell({ bahia, n, hasErr, activa, ocs, shape, onClick }) {
+function BayCell({ bahia, n, hasErr, activa, ocs, tiendas = [], shape, onClick }) {
   const vacia = n === 0;
   const sem = vacia ? 'gris' : hasErr ? 'rojo' : 'verde';
+  const bahiaId = `B-${String(bahia).padStart(2, '0')}`;
+  // Suma de prepacks en esta zona y bahía (no el total general de la OC).
+  const prepsAqui = tiendas.reduce((s, t) => s + t.count, 0);
 
   const baseCls = shape === 'pill' ? 'rounded-full' : 'rounded-card';
-  const widthCls = 'w-[90px]';
-  const heightCls = 'min-h-[80px]';
+  const widthCls = 'w-[110px]';
+  const heightCls = 'min-h-[96px]';
 
   const dotCls = {
     verde:    'bg-flow-ring',
@@ -720,28 +749,51 @@ function BayCell({ bahia, n, hasErr, activa, ocs, shape, onClick }) {
     : hasErr ? 'border-anomaly-ring/40 border-2 dark:border-anomaly-ring/40'
     : 'border-ink-100 border-2 dark:border-ink-600';
 
+  // Tooltip con tiendas destino — útil cuando hay varias y no caben inline.
+  const tooltipTiendas = tiendas.length > 0
+    ? tiendas.map((t) => `${t.nombre} (${t.count})`).join(' · ')
+    : null;
+  const titulo = vacia
+    ? `${bahiaId} — sin prepacks en esta etapa`
+    : tooltipTiendas
+      ? `${bahiaId} — ${tooltipTiendas}`
+      : `${bahiaId} — ${n} OC${n !== 1 ? 's' : ''}`;
+
+  const tiendaPrincipal = tiendas[0];
+  const restantes = tiendas.length - 1;
+
   return (
     <button
       type="button"
       disabled={vacia}
       onClick={vacia ? undefined : onClick}
+      title={titulo}
       className={
+        'relative ' +
         baseCls + ' ' + widthCls + ' ' + heightCls + ' ' + bgCls + ' ' + borderCls + ' ' +
-        'flex flex-col items-center justify-center px-1 py-2 shrink-0 transition-all ' +
+        'flex flex-col items-center justify-center px-1.5 py-2 shrink-0 transition-all ' +
         (vacia ? 'cursor-default' : 'cursor-pointer hover:shadow-card-hover')
       }
     >
-      <div className="font-mono text-[7px] font-bold uppercase tracking-industrial text-ink-400 mb-1">
-        B-{bahia}
+      <div className="font-mono text-[8px] font-bold uppercase tracking-industrial text-ink-400 mb-1">
+        {bahiaId}
       </div>
       <div className="w-full text-center">
         <div className={'text-lg font-extrabold leading-none ' + (vacia ? 'text-ink-400' : 'text-ink-700 dark:text-ink-100')}>
           {n}
         </div>
-        <div className="text-[7px] text-ink-400 mb-1">OCs</div>
+        <div className="text-[7px] text-ink-400">{n === 1 ? 'OC' : 'OCs'}</div>
         {n > 0 && (
-          <div className="text-[9px] text-ink-500 dark:text-ink-300">
-            {ocs.reduce((s, o) => s + (o.totalPrepacks || 0), 0)} prep.
+          <div className="text-[9px] text-ink-500 dark:text-ink-300 mt-0.5">
+            {prepsAqui} prep.
+          </div>
+        )}
+        {tiendaPrincipal && (
+          <div className="text-[9px] text-ink-700 dark:text-ink-100 mt-1 leading-tight truncate w-full" title={tiendaPrincipal.nombre}>
+            {tiendaPrincipal.nombre}
+            {restantes > 0 && (
+              <span className="text-ink-400"> +{restantes}</span>
+            )}
           </div>
         )}
         {hasErr && (
@@ -761,7 +813,7 @@ function BayCell({ bahia, n, hasErr, activa, ocs, shape, onClick }) {
 // EXPANDABLE PANEL
 // ════════════════════════════════════════════════════════════════════
 
-function PanelBahia({ titulo, ocs, onClose, onAbrirOC }) {
+function PanelBahia({ titulo, ocs, numBahia, zona, onClose, onAbrirOC }) {
   if (!ocs || ocs.length === 0) {
     return (
       <div className={
@@ -778,6 +830,31 @@ function PanelBahia({ titulo, ocs, onClose, onAbrirOC }) {
     );
   }
 
+  // Para cada OC calculamos las tiendas destino que tienen prepacks
+  // ESPECÍFICAMENTE en esta bahía + zona (no en otras bahías).
+  // Esto le da al usuario el detalle de "esta OC manda 5 prepacks a Querétaro
+  // y 2 a CDMX en esta bahía".
+  function tiendasDeOcEnEstaBahia(oc) {
+    const tagsZona = oc.tagsPorEtapa?.[zona] || [];
+    const map = new Map();
+    for (const t of tagsZona) {
+      if (parseBahiaNumero(t.tienda?.bahia_asignada) !== numBahia) continue;
+      const tid = t.tienda?.tienda_id || t.tienda_id || '—';
+      if (!map.has(tid)) {
+        map.set(tid, {
+          tienda_id: tid,
+          nombre: t.tienda?.nombre || tid,
+          ciudad: t.tienda?.ciudad || null,
+          count: 0,
+        });
+      }
+      map.get(tid).count += 1;
+    }
+    return Array.from(map.values()).sort((a, b) => b.count - a.count);
+  }
+
+  const bahiaId = numBahia ? `B-${String(numBahia).padStart(2, '0')}` : null;
+
   return (
     <div className={
       'mt-3.5 px-4 py-3 rounded-card border shadow-card-hover ' +
@@ -787,7 +864,14 @@ function PanelBahia({ titulo, ocs, onClose, onAbrirOC }) {
     }>
       <div className="flex justify-between items-center mb-3">
         <div>
-          <div className="text-[14px] font-bold text-ink-700 dark:text-ink-100">{titulo}</div>
+          <div className="text-[14px] font-bold text-ink-700 dark:text-ink-100">
+            {titulo}
+            {bahiaId && (
+              <span className="ml-2 font-mono text-[10px] font-bold uppercase tracking-industrial text-ink-400">
+                · {bahiaId}
+              </span>
+            )}
+          </div>
           <div className="text-[11px] text-ink-400 mt-0.5">
             {ocs.length} orden{ocs.length !== 1 ? 'es' : ''} de compra
           </div>
@@ -795,24 +879,52 @@ function PanelBahia({ titulo, ocs, onClose, onAbrirOC }) {
         <CloseButton onClose={onClose} />
       </div>
 
-      <div className="flex gap-2.5 flex-wrap">
-        {ocs.map((oc) => (
-          <div
-            key={oc.ordenId}
-            onClick={() => onAbrirOC(oc, null)}
-            className={
-              'cursor-pointer rounded-card px-3.5 py-2.5 transition-all min-w-[180px] flex-1 border ' +
-              (oc.hasErr
-                ? 'bg-anomaly-bg/40 border-anomaly-ring/40 border-l-4 border-l-anomaly dark:bg-anomaly/15 dark:border-anomaly-ring/40 dark:border-l-anomaly-ring'
-                : 'bg-ink-50 border-ink-100 border-l-4 border-l-rfid hover:bg-rfid/5 dark:bg-ink-800 dark:border-ink-600 dark:border-l-rfid dark:hover:bg-rfid/10')
-            }
-          >
-            <div className="text-[12px] font-semibold text-ink-700 dark:text-ink-100 mb-0.5">{oc.nombre}</div>
-            <div className="font-mono text-[9px] text-ink-400 mb-1.5">{oc.ordenId} · {oc.totalPrepacks} prepacks</div>
-            <ProgressBar pct={oc.pct} hasErr={oc.hasErr} />
-            <div className="text-[9px] text-ink-400 mt-1">{Math.round(oc.pct)}% procesado</div>
-          </div>
-        ))}
+      <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+        {ocs.map((oc) => {
+          const tiendas = tiendasDeOcEnEstaBahia(oc);
+          const prepsEnBahia = tiendas.reduce((s, t) => s + t.count, 0);
+          return (
+            <div
+              key={oc.ordenId}
+              onClick={() => onAbrirOC(oc, null)}
+              className={
+                'cursor-pointer rounded-card px-3.5 py-2.5 transition-all border ' +
+                (oc.hasErr
+                  ? 'bg-anomaly-bg/40 border-anomaly-ring/40 border-l-4 border-l-anomaly dark:bg-anomaly/15 dark:border-anomaly-ring/40 dark:border-l-anomaly-ring'
+                  : 'bg-ink-50 border-ink-100 border-l-4 border-l-rfid hover:bg-rfid/5 dark:bg-ink-800 dark:border-ink-600 dark:border-l-rfid dark:hover:bg-rfid/10')
+              }
+            >
+              <div className="text-[12px] font-semibold text-ink-700 dark:text-ink-100 mb-0.5 truncate">{oc.nombre}</div>
+              <div className="font-mono text-[9px] text-ink-400 mb-1.5">
+                {oc.ordenId} · {prepsEnBahia} prep. en esta bahía / {oc.totalPrepacks} total
+              </div>
+
+              {/* Tiendas destino dentro de esta bahía */}
+              {tiendas.length > 0 && (
+                <div className="mb-2">
+                  <div className="font-mono text-[8px] font-bold uppercase tracking-industrial text-ink-400 mb-1">
+                    Tiendas destino en {bahiaId || 'esta bahía'}
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {tiendas.map((t) => (
+                      <span
+                        key={t.tienda_id}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white border border-rfid/30 text-rfid dark:bg-ink-700 dark:border-rfid/40 dark:text-blue-300"
+                        title={t.ciudad ? `${t.nombre} — ${t.ciudad}` : t.nombre}
+                      >
+                        <span className="truncate max-w-[120px]">{t.nombre}</span>
+                        <span className="font-mono text-ink-500 dark:text-ink-300">×{t.count}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <ProgressBar pct={oc.pct} hasErr={oc.hasErr} />
+              <div className="text-[9px] text-ink-400 mt-1">{Math.round(oc.pct)}% procesado</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -7,12 +7,60 @@
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8080';
 
-export async function fetchProveedores() {
-  const res = await fetch(`${API_URL}/Proveedor/listarProveedores`);
-  if (!res.ok) {
-    throw new Error(`Error ${res.status} al obtener proveedores`);
+// Storage key + token field are owned by auth.jsx ('vertiche.auth' / idToken);
+// mirror design-system/api.js — never introduce a second key/field.
+const STORAGE_KEY = 'vertiche.auth';
+
+function authHeader() {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const { idToken } = JSON.parse(raw);
+    return idToken ? { Authorization: `Bearer ${idToken}` } : {};
+  } catch {
+    return {};
   }
+}
+
+/**
+ * Single authed fetch wrapper. Every backend call goes through this.
+ * - Attaches Content-Type + Authorization (Cognito id token).
+ * - On 401: clears the session and bounces to login.
+ * - On other non-2xx: reads the response body for diagnostics and throws.
+ */
+async function req(path, options = {}) {
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeader(),
+      ...(options.headers || {}),
+    },
+  });
+
+  if (res.status === 401) {
+    sessionStorage.removeItem(STORAGE_KEY);
+    window.location.href = '/';
+    throw new Error('Sesión expirada');
+  }
+
+  if (!res.ok) {
+    let detail = '';
+    try {
+      const body = await res.text();
+      detail = body ? ` — ${body}` : '';
+    } catch {
+      // body ilegible — seguimos con el status nada más
+    }
+    console.error(`[proveedores] ${path} →`, res.status, detail);
+    throw new Error(`Error ${res.status}${detail}`);
+  }
+
   return res.json();
+}
+
+export async function fetchProveedores() {
+  return req('/Proveedor/listarProveedores');
 }
 
 /**
@@ -21,47 +69,32 @@ export async function fetchProveedores() {
  *              cuota, inspeccionados_hoy, restantes }
  */
 export async function fetchPendientes() {
-  const res = await fetch(`${API_URL}/PlanQA/pendientes`);
-  if (!res.ok) {
-    throw new Error(`Error ${res.status} al obtener pendientes`);
-  }
-  return res.json();
+  return req('/PlanQA/pendientes');
 }
 
 /**
  * Pregunta al backend si un prepack (por su EPC) debe inspeccionarse o no.
- * El backend responde "REVISAR" o "PASA". Aceptamos tanto la respuesta como
- * string crudo o como objeto envolvente para mantener flexibilidad.
+ * El backend responde "REVISAR" o "PASA".
  */
 export async function escanearPrepack(epc) {
-  const res = await fetch(`${API_URL}/PlanQA/escanear`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ epc }),
-  });
-  if (!res.ok) {
-    let detail = '';
-    try {
-      const body = await res.text();
-      detail = body ? ` — ${body}` : '';
-    } catch {}
-    console.error('escanearPrepack response:', res.status, detail);
-    throw new Error(`Error ${res.status} al escanear prepack${detail}`);
-  }
-  return res.json();
+  return req('/PlanQA/escanear', { method: 'POST', body: JSON.stringify({ epc }) });
 }
 
 /**
  * Catálogo de tipos de defecto con criticidad y penalización.
- * Permite que backend ajuste penalizaciones sin necesidad de redesplegar el frontend.
+ * Permite que backend ajuste penalizaciones sin redesplegar el frontend.
  * Cada item: { id, nombre, criticidad, penalizacion, activo }
  */
 export async function fetchCatalogoDefectos() {
-  const res = await fetch(`${API_URL}/CatalogoDefecto/listar`);
-  if (!res.ok) {
-    throw new Error(`Error ${res.status} al obtener catálogo de defectos`);
-  }
-  return res.json();
+  return req('/CatalogoDefecto/listar');
+}
+
+export async function fetchTurnoResumen() {
+  return req('/Turno/resumen');
+}
+
+export async function fetchPerfilProveedor(id) {
+  return req(`/Proveedor/${id}/perfil`);
 }
 
 /**
@@ -71,40 +104,15 @@ export async function fetchCatalogoDefectos() {
  *   tag_epc, proveedor_id, operador_id, resultado ('APROBADO' | 'OBSERVADO' | 'RECHAZADO'),
  *   defectos (string[]), observacion, fecha (ISO string)
  */
-export async function fetchTurnoResumen() {
-  const res = await fetch(`${API_URL}/Turno/resumen`);
-  if (!res.ok) {
-    throw new Error(`Error ${res.status} al obtener resumen del turno`);
-  }
-  return res.json();
-}
-
-export async function fetchPerfilProveedor(id) {
-  const res = await fetch(`${API_URL}/Proveedor/${id}/perfil`);
-  if (!res.ok) {
-    throw new Error(`Error ${res.status} al obtener perfil del proveedor`);
-  }
-  return res.json();
-}
-
 export async function crearInspeccion(payload) {
-  const res = await fetch(`${API_URL}/InspeccionQA/crearInspeccion`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) {
-    // Intenta extraer el mensaje del backend para diagnosticar
-    let detail = '';
-    try {
-      const body = await res.text();
-      detail = body ? ` — ${body}` : '';
-    } catch {
-      // si no se puede leer el body, seguimos con el status nada más
-    }
+  try {
+    return await req('/InspeccionQA/crearInspeccion', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    // Conserva el diagnóstico del payload que tenía la versión anterior.
     console.error('crearInspeccion payload:', payload);
-    console.error('crearInspeccion response:', res.status, detail);
-    throw new Error(`Error ${res.status} al registrar inspección${detail}`);
+    throw err;
   }
-  return res.json();
 }

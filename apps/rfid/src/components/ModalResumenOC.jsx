@@ -34,10 +34,13 @@ export function ModalResumenOC({ oc, onClose }) {
   if (!oc) return null;
 
   const tags = oc.tags || [];
+  const tagsPorEtapa = oc.tagsPorEtapa || {};
   const etapaLogs = oc.etapa_logs || [];
   const total = oc.totalPrepacks || tags.length;
   const esperados = oc.total_esperados || total;
-  const faltantes = oc.faltantes || 0;
+  const faltantes = oc.faltantes != null
+    ? oc.faltantes
+    : Math.max(0, esperados - (oc.total_recibidos != null ? oc.total_recibidos : tags.length));
   const colorPrincipal = tags[0]?.color || '';
   const colorCSS = getColorCSS(colorPrincipal);
   const esClaro = esColorClaro(colorPrincipal);
@@ -47,9 +50,13 @@ export function ModalResumenOC({ oc, onClose }) {
                      nl.includes('jogger') || nl.includes('chino') || nl.includes('short') ||
                      nl.includes('falda');
 
-  /** Per-stage metrics object. */
+  /** Per-stage metrics object. `eId` es id del Gantt (PREREGISTRO, QA, ...). */
   function getStageMetrics(eId) {
-    const te = tags.filter((t) => t.etapa_actual === eId);
+    // Antes filtrábamos por `t.etapa_actual === eId` pero eso comparaba
+    // estados del backend (REGISTRADO, EN_QA, ...) contra ids del Gantt
+    // (PREREGISTRO, QA, ...) y siempre daba 0. Usamos tagsPorEtapa que
+    // ya viene mapeado correctamente.
+    const te = tagsPorEtapa[eId] || tags.filter((t) => t.etapa_actual === eId);
     const n = te.length;
     const err = te.filter((t) => t.qa_fallido).length;
     const log = etapaLogs.find((l) => l.etapa === eId);

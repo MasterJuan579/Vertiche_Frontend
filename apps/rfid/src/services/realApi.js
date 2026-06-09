@@ -17,8 +17,8 @@ function authHeader() {
   try {
     const raw = sessionStorage.getItem('vertiche.auth');
     if (!raw) return {};
-    const { token } = JSON.parse(raw);
-    return token ? { Authorization: `Bearer ${token}` } : {};
+    const { idToken } = JSON.parse(raw);
+    return idToken ? { Authorization: `Bearer ${idToken}` } : {};
   } catch {
     return {};
   }
@@ -146,10 +146,10 @@ export const realApi = {
   // CREAR OC completa: Pedido + OC + N Palets + M DetalleOrden + Tags placeholder
   // (endpoint del módulo RFID)
   // ============================================
-  crearOrdenCompra({ proveedor_id, nombre_producto, modelo, numero_palets, detalles }) {
+  crearOrdenCompra({ proveedor_id, nombre_producto, modelo, numero_palets, detalles, agruparOC = false }) {
     return request('/rfid/orden-compra', {
       method: 'POST',
-      body: { proveedor_id, nombre_producto, modelo, numero_palets, detalles },
+      body: { proveedor_id, nombre_producto, modelo, numero_palets, detalles, agruparOC },
     });
   },
 
@@ -163,6 +163,38 @@ export const realApi = {
     return request('/rfid/asignar-epc', {
       method: 'POST',
       body: { epc_placeholder, epc_real },
+    });
+  },
+
+  // ============================================
+  // CHIP MAESTRO (OrdenAgrupador) — opcional por OC
+  // ============================================
+  // Si la OC se creo sin el flag agruparOC, este endpoint permite activarlo
+  // despues. Bloqueado por el backend si hay tags fuera de REGISTRADO.
+  crearAgrupador(orden_id) {
+    return request('/rfid/orden-agrupador', {
+      method: 'POST',
+      body: { orden_id },
+    });
+  },
+
+  // Asigna el EPC real del chip maestro tras escanearlo en el lector de registro.
+  asignarEpcAgrupador({ orden_id, epc_real }) {
+    return request('/rfid/asignar-epc-agrupador', {
+      method: 'POST',
+      body: { orden_id, epc_real },
+    });
+  },
+
+  // Devuelve el agrupador de una OC (o null) + total_prepacks.
+  getAgrupador(orden_id) {
+    return request(`/rfid/orden/${encodeURIComponent(orden_id)}/agrupador`);
+  },
+
+  // Elimina el agrupador (util para corregir si se equivoca el supervisor).
+  deleteAgrupador(orden_id) {
+    return request(`/rfid/orden-agrupador/${encodeURIComponent(orden_id)}`, {
+      method: 'DELETE',
     });
   },
 
