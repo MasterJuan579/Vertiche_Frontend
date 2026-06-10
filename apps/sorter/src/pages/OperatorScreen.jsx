@@ -85,6 +85,7 @@ export function OperatorScreen({ realtime }) {
           <WaitingState />
         ) : (
           <PickState
+            key={current.scanId}
             current={current}
             shouldPick={shouldPick}
             selectedBay={displayBay}
@@ -154,8 +155,39 @@ function WaitingState() {
 }
 
 function PickState({ current, shouldPick, selectedBay, cajaId, destinationColor }) {
+  const isDuplicate = current.isDuplicatePrepack;
+
   return (
     <div className="w-full flex flex-col items-center gap-4 sm:gap-5 animate-[fadeIn_.25s_ease]">
+      <div
+        className={
+          'flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-5 py-2.5 rounded-card border-2 bg-white shadow-card dark:bg-ink-700 ' +
+          (isDuplicate
+            ? 'border-anomaly dark:border-anomaly-ring'
+            : shouldPick
+            ? 'border-flow dark:border-flow-ring'
+            : 'border-ink-300 dark:border-ink-500')
+        }
+      >
+        <span
+          className={
+            'font-display text-base font-black uppercase tracking-industrial ' +
+            (isDuplicate
+              ? 'text-anomaly dark:text-anomaly-ring'
+              : shouldPick
+              ? 'text-flow dark:text-flow-ring'
+              : 'text-ink-600 dark:text-ink-200')
+          }
+        >
+          {isDuplicate
+            ? 'Ya escaneado - escanee otro'
+            : `Nueva carga #${String(current.loadNumber || 1).padStart(3, '0')}`}
+        </span>
+        <span className="font-mono text-xs font-bold text-rfid dark:text-blue-300">
+          EPC: ...{current.epc?.slice(-6) || '---'}
+        </span>
+      </div>
+
       <div
         className={
           'w-[min(24vh,220px)] h-[min(24vh,220px)] sm:w-[min(30vh,260px)] sm:h-[min(30vh,260px)] rounded-full flex items-center justify-center border-[7px] sm:border-[8px] shadow-card-hover shrink-0 ' +

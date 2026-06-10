@@ -87,6 +87,7 @@ export function SorterScreen({ realtime }) {
             <EmptyState />
           ) : current.isMisrouted ? (
             <MisroutedView
+              key={current.scanId}
               current={current}
               selected={selected}
               bayColor={bayColor}
@@ -94,6 +95,7 @@ export function SorterScreen({ realtime }) {
             />
           ) : (
             <NormalView
+              key={current.scanId}
               current={current}
               selected={selected}
               bayColor={bayColor}
@@ -164,6 +166,8 @@ function NormalView({ current, selected, bayColor }) {
         backgroundImage: `radial-gradient(ellipse at top, ${bayColor}1c 0%, transparent 55%)`,
       }}
     >
+      <NewLoadBanner current={current} accentColor={bayColor} />
+
       <p className="font-mono text-xs uppercase tracking-industrial text-ink-400 mt-1">
         Llevar a
       </p>
@@ -208,6 +212,8 @@ function MisroutedView({ current, selected, correctBayColor }) {
           'radial-gradient(ellipse at top, rgba(239,68,68,0.22) 0%, rgba(239,68,68,0.05) 40%, transparent 70%)',
       }}
     >
+      <NewLoadBanner current={current} accentColor="#ef4444" />
+
       <div className="flex items-center gap-3.5 mt-2 animate-[blink_1.4s_ease-in-out_infinite]">
         <IconWarning size={26} color="#ef4444" />
         <p className="font-mono text-base font-extrabold tracking-[0.3em] uppercase text-anomaly dark:text-anomaly-ring">
@@ -275,6 +281,30 @@ function MisroutedView({ current, selected, correctBayColor }) {
       <div className="w-full flex justify-center" style={{ transform: 'scale(0.78)', transformOrigin: 'top center', opacity: 0.9 }}>
         <PrepackDetailBar prepack={selected} />
       </div>
+    </div>
+  );
+}
+
+function NewLoadBanner({ current, accentColor }) {
+  const isDuplicate = current.isDuplicatePrepack;
+  const bannerColor = isDuplicate ? '#ef4444' : accentColor;
+
+  return (
+    <div
+      className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 px-5 py-2 rounded-card border-2 bg-white shadow-card dark:bg-ink-700 animate-[fadeIn_.25s_ease]"
+      style={{ borderColor: bannerColor }}
+    >
+      <span
+        className="font-display text-sm font-black uppercase tracking-industrial"
+        style={{ color: bannerColor }}
+      >
+        {isDuplicate
+          ? 'Ya escaneado - escanee otro'
+          : `Nueva carga #${String(current.loadNumber || 1).padStart(3, '0')}`}
+      </span>
+      <span className="font-mono text-[11px] font-bold text-ink-600 dark:text-ink-200">
+        EPC: ...{current.epc?.slice(-6) || '---'}
+      </span>
     </div>
   );
 }
